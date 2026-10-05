@@ -7,12 +7,19 @@ import os
 
 from .adapters import command
 from .adapters.mock import MockAdapter
+from .multiperson import adapters as mp
 
 FACTORIES = {
     "mock": MockAdapter,
     "dreamid_v": command.dreamid_v,
     "wan22_animate_14b": command.wan22_animate_14b,
     "wan22_ti2v_5b": command.wan22_ti2v_5b,
+    # multi-person
+    "mp_analyzer": mp.mp_analyzer,
+    "dreamid_v_mp": mp.dreamid_v_mp,
+    "wan22_animate_mp": mp.wan22_animate_mp,
+    "mock_mp_analyzer": mp.mock_mp_analyzer,
+    "mock_mp": mp.mock_mp,
 }
 
 

@@ -8,7 +8,7 @@ from ..config import get_settings
 from ..db import get_db
 from ..deps import current_user
 from ..errors import ApiError
-from ..models import GenerationJob, GenerationOutput, JobStatus, Report, Template, User
+from ..models import GenerationJob, GenerationOutput, JobKind, JobStatus, Report, Template, User
 from ..schemas import GenerationIn, GenerationOut, OutputOut, ReportIn
 from ..services import generation as gen
 from ..services import ratelimit
@@ -20,6 +20,7 @@ router = APIRouter(prefix="/generations", tags=["generations"])
 def to_out(db: Session, job: GenerationJob) -> GenerationOut:
     out = GenerationOut(
         id=job.id, status=job.status.value, progress=round(job.progress, 3), template_id=job.template_id,
+        kind=job.kind.value,
         queue_class=job.queue_class, credit_cost=job.credit_cost, refunded=job.refunded,
         error_code=job.error_code, error_message=job.error_message, created_at=job.created_at,
         finished_at=job.finished_at,
@@ -28,9 +29,10 @@ def to_out(db: Session, job: GenerationJob) -> GenerationOut:
         out.queue_position = db.execute(select(func.count()).select_from(GenerationJob).where(
             GenerationJob.status == JobStatus.queued, GenerationJob.queue_class == job.queue_class,
             GenerationJob.created_at < job.created_at)).scalar_one() + 1
-    tpl = db.get(Template, job.template_id)
-    if tpl and job.status not in (JobStatus.completed, JobStatus.failed, JobStatus.cancelled):
-        out.est_seconds_remaining = int(tpl.est_seconds * (1 - job.progress)) + 20 * (out.queue_position or 0)
+    tpl = db.get(Template, job.template_id) if job.template_id else None
+    est = tpl.est_seconds if tpl else int(job.spec.get("est_seconds", 300))
+    if job.status not in (JobStatus.completed, JobStatus.failed, JobStatus.cancelled):
+        out.est_seconds_remaining = int(est * (1 - job.progress)) + 20 * (out.queue_position or 0)
     if job.status == JobStatus.completed:
         o = db.execute(select(GenerationOutput).where(GenerationOutput.job_id == job.id,
                                                       GenerationOutput.deleted_at.is_(None))).scalar_one_or_none()
@@ -47,7 +49,10 @@ def to_out(db: Session, job: GenerationJob) -> GenerationOut:
 def create(body: GenerationIn, response: Response, user: User = Depends(current_user),
            idempotency_key: str = Header(alias="Idempotency-Key", min_length=8, max_length=80),
            db: Session = Depends(get_db)):
-    ratelimit.hit("generate", str(user.id), get_settings().rl_generation_per_min)
+    replay = db.execute(select(GenerationJob.id).where(GenerationJob.user_id == user.id,
+                                                       GenerationJob.idempotency_key == idempotency_key)).first()
+    if replay is None:  # network retries of the same request aren't throttled
+        ratelimit.hit("generate", str(user.id), get_settings().rl_generation_per_min)
     res = gen.create_job(db, user, body.template_id, body.profile_id, body.text, idempotency_key)
     db.commit()
     if not res.created:
@@ -57,7 +62,8 @@ def create(body: GenerationIn, response: Response, user: User = Depends(current_
 
 @router.get("", response_model=list[GenerationOut])
 def list_mine(limit: int = 30, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    jobs = db.execute(select(GenerationJob).where(GenerationJob.user_id == user.id)
+    jobs = db.execute(select(GenerationJob).where(GenerationJob.user_id == user.id,
+                                                  GenerationJob.kind != JobKind.analysis)
                       .order_by(GenerationJob.created_at.desc()).limit(min(limit, 100))).scalars().all()
     return [to_out(db, j) for j in jobs]
 
@@ -94,6 +100,17 @@ def retry(job_id: uuid.UUID, user: User = Depends(current_user), db: Session = D
     old = gen.get_user_job(db, user, job_id)
     if old.status != JobStatus.failed:
         raise ApiError(409, "not_failed", "only failed generations can be retried")
+    if old.kind == JobKind.multi_replace:
+        from ..services import multiperson as mp
+
+        assigns = [(a["track_id"], uuid.UUID(a["profile_id"])) for a in old.spec.get("assignments", [])]
+        job, _ = mp.create_replace_job(db, user, old.source_video_id, assigns,
+                                       old.spec.get("resolution", "720x1280"), bool(old.spec.get("preview")),
+                                       f"retry:{old.id}")
+        db.commit()
+        return to_out(db, job)
+    if old.kind != JobKind.template:
+        raise ApiError(409, "not_retryable", "this job can't be retried")
     res = gen.create_job(db, user, old.template_id, old.profile_id, old.user_text, f"retry:{old.id}")
     db.commit()
     return to_out(db, res.job)

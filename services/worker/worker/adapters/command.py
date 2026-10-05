@@ -20,7 +20,7 @@ from .base import AdapterError, Cancelled, Capabilities, GenerationRequest, Gene
 
 def _gpu_info() -> dict:
     try:
-        out = subprocess.run(["nvidia-smi", "--query-gpu=name,memory.total,memory.used,utilization.gpu",  # noqa: S607
+        out = subprocess.run(["nvidia-smi", "--query-gpu=name,memory.total,memory.used,utilization.gpu",
                               "--format=csv,noheader,nounits"], capture_output=True, text=True, timeout=5)
         name, total, used, util = [x.strip() for x in out.stdout.splitlines()[0].split(",")]
         return {"gpu": name, "vram_total_mb": int(total), "vram_used_mb": int(used), "util_pct": int(util)}
@@ -85,7 +85,7 @@ class CommandAdapter:
         log = open(req.workdir / f"{self.name}.log", "wb")  # noqa: SIM115
         t0 = time.time()
         est = self.estimate(req)["gpu_seconds"] or 60
-        self._proc = subprocess.Popen(cmd, cwd=self.repo, stdout=log, stderr=subprocess.STDOUT)  # noqa: S603
+        self._proc = subprocess.Popen(cmd, cwd=self.repo, stdout=log, stderr=subprocess.STDOUT)
         try:
             while self._proc.poll() is None:
                 elapsed = time.time() - t0

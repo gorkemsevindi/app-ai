@@ -21,6 +21,7 @@ from ..models import (
     GenerationOutput,
     IdentityAsset,
     IdentityProfile,
+    JobKind,
     JobStatus,
     LedgerReason,
     ModelRun,
@@ -112,6 +113,8 @@ def create_job(db: Session, user: User, template_id: uuid.UUID, profile_id: uuid
         raise not_found("template")
     if tpl.pro_only and queue_class_for(user) != "paid_high":
         raise ApiError(402, "pro_required", "this template requires Pro")
+    ver = db.get(TemplateVersion, tpl.current_version_id)
+    assert ver is not None
     tag_decision = moderation.check_template_tags(tpl.safety_tags)
     if not tag_decision.allowed:
         raise not_found("template")
@@ -138,7 +141,7 @@ def create_job(db: Session, user: User, template_id: uuid.UUID, profile_id: uuid
     # Serialize per user: concurrency cap + debit happen under the same row lock.
     credits.lock_user(db, user.id)
     active = db.execute(select(func.count()).select_from(GenerationJob).where(
-        GenerationJob.user_id == user.id,
+        GenerationJob.user_id == user.id, GenerationJob.kind != JobKind.analysis,
         GenerationJob.status.notin_([s.value for s in TERMINAL_STATUSES]))).scalar_one()
     if active >= s.max_active_jobs_per_user:
         raise ApiError(429, "too_many_active_jobs", "wait for your current videos to finish")
@@ -151,6 +154,7 @@ def create_job(db: Session, user: User, template_id: uuid.UUID, profile_id: uuid
     job = GenerationJob(
         id=uuid.uuid4(), user_id=user.id, profile_id=profile_id, template_id=tpl.id,
         template_version_id=tpl.current_version_id, status=JobStatus.queued, queue_class=qc,
+        kind=JobKind.template, preferred_model=ver.preferred_model, fallback_model=ver.fallback_model,
         user_text=user_text, idempotency_key=idempotency_key, credit_cost=tpl.credit_cost,
         max_attempts=s.job_max_attempts, watermark=(qc == "free"),
     )
@@ -222,6 +226,13 @@ def reap_expired_leases(db: Session, limit: int = 100) -> int:
     return len(expired)
 
 
+def _on_terminal_failure(db: Session, job: GenerationJob) -> None:
+    if job.kind == JobKind.analysis and job.source_video_id:
+        from . import multiperson
+
+        multiperson.mark_analysis_failed(db, job)
+
+
 def _requeue_or_fail(db: Session, job: GenerationJob, code: str, message: str) -> None:
     if job.cancel_requested:
         transition(job, JobStatus.cancelled)
@@ -235,6 +246,7 @@ def _requeue_or_fail(db: Session, job: GenerationJob, code: str, message: str) -
         job.error_code, job.error_message = code, message
         transition(job, JobStatus.failed)
         _refund(db, job, code)
+        _on_terminal_failure(db, job)
 
 
 def claim(db: Session, worker_id: str, models: list[str]) -> GenerationJob | None:
@@ -253,24 +265,22 @@ def claim(db: Session, worker_id: str, models: list[str]) -> GenerationJob | Non
     disabled = _disabled_models(db)
     fallback_cutoff = now() - timedelta(seconds=FALLBACK_AFTER_S)
     model_ok = or_(
-        TemplateVersion.preferred_model.in_(usable),
-        and_(TemplateVersion.fallback_model.in_(usable),
-             or_(TemplateVersion.preferred_model.in_(disabled or {"__none__"}),
+        GenerationJob.preferred_model.in_(usable),
+        and_(GenerationJob.fallback_model.in_(usable),
+             or_(GenerationJob.preferred_model.in_(disabled or {"__none__"}),
                  GenerationJob.created_at < fallback_cutoff)),
     )
     for qc in classes:
-        row = db.execute(
-            select(GenerationJob, TemplateVersion)
-            .join(TemplateVersion, TemplateVersion.id == GenerationJob.template_version_id)
+        job = db.execute(
+            select(GenerationJob)
             .where(GenerationJob.status == JobStatus.queued, GenerationJob.queue_class == qc, model_ok)
             .order_by(GenerationJob.created_at)
             .limit(1)
-            .with_for_update(of=GenerationJob, skip_locked=True)
-        ).first()
-        if row is None:
+            .with_for_update(skip_locked=True)
+        ).scalar_one_or_none()
+        if job is None:
             continue
-        job, ver = row
-        model = ver.preferred_model if ver.preferred_model in usable else ver.fallback_model
+        model = job.preferred_model if job.preferred_model in usable else job.fallback_model
         transition(job, JobStatus.preprocessing)
         job.attempts += 1
         job.lease_owner = worker_id
@@ -314,6 +324,14 @@ def complete(db: Session, job_id: uuid.UUID, worker_id: str, attempt: int, outpu
     for step in (JobStatus.generating, JobStatus.postprocessing, JobStatus.moderation):
         if _PIPELINE_ORDER.index(job.status) < _PIPELINE_ORDER.index(step):
             transition(job, step)
+
+    if job.kind == JobKind.analysis:
+        from . import multiperson
+
+        multiperson.apply_analysis(db, job, output)
+        job.progress = 1.0
+        transition(job, JobStatus.completed)
+        return job
 
     storage = get_storage()
     video_key = output_key(job, "video.mp4")
@@ -361,6 +379,7 @@ def fail(db: Session, job_id: uuid.UUID, worker_id: str, attempt: int, code: str
         job.error_code, job.error_message = code, message[:500]
         transition(job, JobStatus.failed)
         _refund(db, job, code)
+        _on_terminal_failure(db, job)
     return job
 
 
@@ -393,6 +412,10 @@ def compile_prompt(ver: TemplateVersion, user_text: str | None) -> str:
 
 
 def build_worker_payload(db: Session, job: GenerationJob) -> dict:
+    if job.kind != JobKind.template:
+        from . import multiperson
+
+        return multiperson.build_payload(db, job)
     ver = db.get(TemplateVersion, job.template_version_id)
     tpl = db.get(Template, job.template_id)
     assert ver is not None and tpl is not None

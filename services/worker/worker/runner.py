@@ -4,6 +4,7 @@ API can retry (new attempt, no extra charge) or fail + refund."""
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import shutil
@@ -70,6 +71,9 @@ def process(api: ApiClient, adapters: dict, payload: dict, workdir: Path) -> Non
         adapter = adapters.get(payload["model"])
         if adapter is None:
             raise AdapterError("model_unavailable", f"{payload['model']} not loaded on this worker")
+        if payload.get("kind") in ("analysis", "multi_replace"):
+            _process_multiperson(api, adapter, payload, workdir, hb, metrics, t0)
+            return
         refs = []
         for i, a in enumerate(payload["identity_assets"]):
             if a["kind"] == "photo":
@@ -103,12 +107,62 @@ def process(api: ApiClient, adapters: dict, payload: dict, workdir: Path) -> Non
     except AdapterError as e:
         hb.stop()
         _safe_fail(api, job_id, attempt, e.code, str(e), e.retryable, metrics)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         hb.stop()
         log.exception("job %s crashed", job_id)
         _safe_fail(api, job_id, attempt, "worker_exception", repr(e), True, metrics)
     finally:
         hb.stop()
+
+
+def _process_multiperson(api: ApiClient, adapter, payload: dict, workdir: Path, hb: Heartbeat, metrics: dict,
+                         t0: float) -> None:
+    job_id, attempt = payload["job_id"], payload["attempt"]
+    source = download(payload["source_video_url"], workdir / "source.mp4")
+    if payload["kind"] == "analysis":
+        hb.update(0.05, "generating")
+        res = adapter.run(payload, source, workdir, hb.update, hb.cancel)
+        if hb.lost.is_set():
+            return
+        hb.update(0.9, "postprocessing")
+        ups = payload["upload"]
+        upload(ups["tracks"]["url"], Path(res.pop("_tracks_path")), "application/json")
+        thumbs = res.pop("_thumbnails")
+        for p in res["persons"]:
+            slot = ups["thumbnails"].get(str(p["worker_track_id"]))
+            local = thumbs.get(str(p["worker_track_id"]))
+            if slot and local:
+                upload(slot["url"], Path(local), "image/jpeg")
+                p["thumbnail_key"] = slot["key"]
+        timing = res.pop("timing", {})
+        elapsed = time.time() - t0
+        metrics.update(gpu_seconds=elapsed, est_cost_usd=round(elapsed / 3600 * GPU_PRICE_PER_HOUR, 5), **timing)
+        hb.stop()
+        api.complete(job_id, attempt, {"analysis": res}, {}, metrics)
+        return
+
+    tracks_path = download(payload["tracks_url"], workdir / "tracks.json")
+    identities: dict[str, list[Path]] = {}
+    for track, assets in payload["identities"].items():
+        identities[track] = [download(a["url"], workdir / f"id_{track}_{i:02d}.img")
+                             for i, a in enumerate(assets) if a["kind"] == "photo"]
+    hb.update(0.05, "generating")
+
+    out, qa = adapter.run(payload, source, json.loads(tracks_path.read_text()), identities, workdir, hb.update,
+                          hb.cancel)
+    if hb.lost.is_set():
+        return
+    hb.update(0.9, "postprocessing")
+    w, h = (int(x) for x in payload["spec"].get("resolution", "720x1280").split("x"))
+    enc = encode_vertical(out, workdir, width=w, height=h, watermark=payload.get("watermark", True), job_id=job_id)
+    report = moderation_report(enc.video)
+    upload(payload["upload"]["video"]["url"], enc.video, "video/mp4")
+    upload(payload["upload"]["thumbnail"]["url"], enc.thumbnail, "image/jpeg")
+    gpu_s = qa.pop("gpu_seconds", time.time() - t0)
+    metrics.update(gpu_seconds=gpu_s, est_cost_usd=round(gpu_s / 3600 * GPU_PRICE_PER_HOUR, 5), qa=qa)
+    hb.stop()
+    api.complete(job_id, attempt, {"width": enc.width, "height": enc.height, "duration_ms": enc.duration_ms,
+                                   "codec": "h264", "qa": qa}, report, metrics)
 
 
 def _safe_fail(api, job_id, attempt, code, msg, retryable, metrics) -> None:

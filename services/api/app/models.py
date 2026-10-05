@@ -200,13 +200,26 @@ class JobStatus(str, enum.Enum):
 TERMINAL_STATUSES = {JobStatus.completed, JobStatus.failed, JobStatus.cancelled}
 
 
+class JobKind(str, enum.Enum):
+    template = "template"            # identity profile x template (classic flow)
+    analysis = "analysis"            # multi-person: detect + track people in an uploaded video (no credits)
+    multi_replace = "multi_replace"  # multi-person: replace assigned people in an uploaded video
+
+
 class GenerationJob(TimestampMixin, Base):
     __tablename__ = "generation_jobs"
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[JobKind] = mapped_column(_enum(JobKind, "job_kind"), default=JobKind.template)
     profile_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("identity_profiles.id", ondelete="SET NULL"))
-    template_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("templates.id"))
-    template_version_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("template_versions.id"))
+    template_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("templates.id"))
+    template_version_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("template_versions.id"))
+    source_video_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("source_videos.id", ondelete="SET NULL"),
+                                                              index=True)
+    # Model routing snapshot taken at creation (template version or remote config).
+    preferred_model: Mapped[str] = mapped_column(String(60))
+    fallback_model: Mapped[str | None] = mapped_column(String(60))
+    spec: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)  # kind-specific worker parameters
     status: Mapped[JobStatus] = mapped_column(_enum(JobStatus, "job_status"), default=JobStatus.queued)
     queue_class: Mapped[str] = mapped_column(String(16), default="free")
     user_text: Mapped[str | None] = mapped_column(String(200))
@@ -234,6 +247,72 @@ class GenerationJob(TimestampMixin, Base):
               postgresql_where=status.in_([JobStatus.preprocessing, JobStatus.generating,
                                            JobStatus.postprocessing, JobStatus.moderation])),
     )
+
+
+class SourceVideoStatus(str, enum.Enum):
+    pending_upload = "pending_upload"
+    analyzing = "analyzing"
+    ready = "ready"
+    rejected = "rejected"
+    failed = "failed"
+    deleted = "deleted"
+
+
+class SourceVideo(TimestampMixin, Base):
+    """A user-uploaded real video for multi-person replacement. Rights/consent attested at creation."""
+
+    __tablename__ = "source_videos"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    storage_key: Mapped[str] = mapped_column(String(512), unique=True)
+    mime: Mapped[str] = mapped_column(String(64))
+    declared_size: Mapped[int] = mapped_column(BigInteger)
+    size_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    status: Mapped[SourceVideoStatus] = mapped_column(_enum(SourceVideoStatus, "source_video_status"),
+                                                      default=SourceVideoStatus.pending_upload)
+    rights_attested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    attestation_version: Mapped[str] = mapped_column(String(32))
+    duration_ms: Mapped[int | None] = mapped_column(Integer)
+    width: Mapped[int | None] = mapped_column(Integer)
+    height: Mapped[int | None] = mapped_column(Integer)
+    fps: Mapped[float | None] = mapped_column(Float)
+    analysis_job_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    analysis: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)  # flags, model versions, timings
+    rejection_reason: Mapped[str | None] = mapped_column(String(120))
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    persons: Mapped[list["VideoPerson"]] = relationship(back_populates="video", order_by="VideoPerson.track_id")
+
+
+class VideoPerson(Base):
+    """One persistent track (same physical person across the whole clip, incl. exits/re-entries)."""
+
+    __tablename__ = "video_persons"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    source_video_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("source_videos.id", ondelete="CASCADE"),
+                                                       index=True)
+    track_id: Mapped[int] = mapped_column(Integer)          # 1-based, shown as "Person {track_id}"
+    first_frame: Mapped[int] = mapped_column(Integer)
+    last_frame: Mapped[int] = mapped_column(Integer)
+    coverage: Mapped[float] = mapped_column(Float)          # fraction of frames where visible
+    face_visible_ratio: Mapped[float] = mapped_column(Float, default=0.0)
+    median_face_px: Mapped[int] = mapped_column(Integer, default=0)
+    thumbnail_key: Mapped[str | None] = mapped_column(String(512))
+    selectable: Mapped[bool] = mapped_column(Boolean, default=True)
+    flags: Mapped[list[str]] = mapped_column(JSONB, default=list)   # too_small, heavy_occlusion, ...
+    stats: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    video: Mapped[SourceVideo] = relationship(back_populates="persons")
+
+    __table_args__ = (UniqueConstraint("source_video_id", "track_id", name="uq_video_persons_track"),)
+
+
+class JobAssignment(Base):
+    __tablename__ = "job_assignments"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("generation_jobs.id", ondelete="CASCADE"), index=True)
+    track_id: Mapped[int] = mapped_column(Integer)
+    profile_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("identity_profiles.id", ondelete="SET NULL"))
+
+    __table_args__ = (UniqueConstraint("job_id", "track_id", name="uq_job_assignments_track"),)
 
 
 class GenerationOutput(TimestampMixin, Base):

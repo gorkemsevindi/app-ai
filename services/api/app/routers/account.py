@@ -26,6 +26,8 @@ from ..models import (
     IdentityProfile,
     JobStatus,
     ProfileStatus,
+    SourceVideo,
+    SourceVideoStatus,
     User,
     UserStatus,
 )
@@ -54,6 +56,8 @@ def delete_user_data(db: Session, user: User, actor_id=None, ip: str | None = No
                .values(status=AssetStatus.deleted, deleted_at=now))
     db.execute(update(IdentityProfile).where(IdentityProfile.user_id == user.id)
                .values(status=ProfileStatus.deleted, deleted_at=now, quality_report={}, name="deleted"))
+    db.execute(update(SourceVideo).where(SourceVideo.user_id == user.id)
+               .values(status=SourceVideoStatus.deleted, deleted_at=now, analysis={}))
     job_ids = select(GenerationJob.id).where(GenerationJob.user_id == user.id)
     db.execute(update(GenerationOutput).where(GenerationOutput.job_id.in_(job_ids)).values(deleted_at=now))
     db.execute(update(GenerationJob).where(GenerationJob.user_id == user.id).values(user_text=None))

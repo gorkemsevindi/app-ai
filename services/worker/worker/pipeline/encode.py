@@ -21,13 +21,13 @@ class EncodedVideo:
 
 
 def _run(cmd: list[str]) -> None:
-    r = subprocess.run(cmd, capture_output=True, text=True)  # noqa: S603
+    r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
         raise RuntimeError(f"ffmpeg failed: {r.stderr[-500:]}")
 
 
 def probe(path: Path) -> dict:
-    r = subprocess.run(["ffprobe", "-v", "error", "-print_format", "json", "-show_streams", "-show_format",  # noqa: S607
+    r = subprocess.run(["ffprobe", "-v", "error", "-print_format", "json", "-show_streams", "-show_format",
                         str(path)], capture_output=True, text=True, check=True)
     return json.loads(r.stdout)
 

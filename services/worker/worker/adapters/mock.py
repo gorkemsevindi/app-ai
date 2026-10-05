@@ -38,7 +38,7 @@ class MockAdapter:
         cmd = ["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi",
                "-i", f"testsrc2=size={req.width}x{req.height}:rate=24:duration={req.duration_s}",
                "-pix_fmt", "yuv420p", "-c:v", "libx264", "-preset", "ultrafast", str(out)]
-        self._proc = subprocess.Popen(cmd)  # noqa: S603
+        self._proc = subprocess.Popen(cmd)
         while self._proc.poll() is None:
             if cancel.is_set():
                 self._proc.kill()

@@ -150,7 +150,8 @@ class GenerationOut(BaseModel):
     id: uuid.UUID
     status: str
     progress: float
-    template_id: uuid.UUID
+    kind: str = "template"
+    template_id: uuid.UUID | None
     queue_class: str
     queue_position: int | None = None
     est_seconds_remaining: int | None = None
