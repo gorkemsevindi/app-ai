@@ -1,0 +1,152 @@
+"""GPU worker main loop: claim -> download inputs -> adapter.generate (with heartbeat thread)
+-> encode 9:16 -> QA scores -> upload -> complete. Any exception becomes a typed failure so the
+API can retry (new attempt, no extra charge) or fail + refund."""
+
+from __future__ import annotations
+
+import logging
+import os
+import shutil
+import signal
+import socket
+import tempfile
+import threading
+import time
+from pathlib import Path
+
+from .adapters.base import AdapterError, Cancelled, GenerationRequest
+from .client import ApiClient, LeaseLost, download, upload
+from .pipeline.encode import encode_vertical
+from .pipeline.qa import moderation_report
+from .registry import load_adapters
+
+log = logging.getLogger("worker")
+
+GPU_PRICE_PER_HOUR = float(os.environ.get("GPU_PRICE_PER_HOUR", "0"))
+
+
+class Heartbeat(threading.Thread):
+    def __init__(self, api: ApiClient, job_id: str, attempt: int, interval: float):
+        super().__init__(daemon=True)
+        self.api, self.job_id, self.attempt, self.interval = api, job_id, attempt, interval
+        self.progress = 0.0
+        self.status: str | None = None
+        self.cancel = threading.Event()
+        self.lost = threading.Event()
+        self._halt = threading.Event()
+
+    def run(self) -> None:
+        while not self._halt.wait(self.interval):
+            self.beat()
+
+    def beat(self) -> None:
+        try:
+            r = self.api.heartbeat(self.job_id, self.attempt, self.status, self.progress)
+            self.status = None
+            if r.get("cancel"):
+                self.cancel.set()
+        except LeaseLost:
+            self.lost.set()
+            self.cancel.set()  # stop burning GPU on a job someone else now owns
+        except Exception:  # transient network error: keep trying until lease expiry
+            log.warning("heartbeat failed", exc_info=True)
+
+    def update(self, fraction: float, stage: str | None = None) -> None:
+        self.progress = fraction
+        if stage:
+            self.status = stage
+
+    def stop(self) -> None:
+        self._halt.set()
+
+
+def process(api: ApiClient, adapters: dict, payload: dict, workdir: Path) -> None:
+    job_id, attempt = payload["job_id"], payload["attempt"]
+    hb = Heartbeat(api, job_id, attempt, interval=max(5.0, payload.get("lease_s", 120) / 4))
+    hb.start()
+    t0 = time.time()
+    metrics: dict = {"gpu_provider": os.environ.get("GPU_PROVIDER"), "gpu_type": os.environ.get("GPU_TYPE")}
+    try:
+        adapter = adapters.get(payload["model"])
+        if adapter is None:
+            raise AdapterError("model_unavailable", f"{payload['model']} not loaded on this worker")
+        refs = []
+        for i, a in enumerate(payload["identity_assets"]):
+            if a["kind"] == "photo":
+                refs.append(download(a["url"], workdir / f"id_{i:02d}.img"))
+        src = download(payload["source_video_url"], workdir / "source.mp4") if payload.get("source_video_url") else None
+        w, h = (int(x) for x in payload.get("params", {}).get("resolution", "720x1280").split("x"))
+        req = GenerationRequest(job_id=job_id, task=payload["capability"], prompt=payload["prompt"],
+                                negative_prompt=payload.get("negative_prompt", ""),
+                                duration_s=float(payload["duration_s"]), width=w, height=h, identity_images=refs,
+                                workdir=workdir, params=payload.get("params", {}), source_video=src)
+        hb.update(0.05, "generating")
+        result = adapter.generate(req, hb.update, hb.cancel)
+        if hb.lost.is_set():
+            return
+        hb.update(0.9, "postprocessing")
+        enc = encode_vertical(result.video_path, workdir, watermark=payload.get("watermark", True), job_id=job_id)
+        report = moderation_report(enc.video)
+        upload(payload["upload"]["video"]["url"], enc.video, "video/mp4")
+        upload(payload["upload"]["thumbnail"]["url"], enc.thumbnail, "image/jpeg")
+        gpu_s = result.gpu_seconds or (time.time() - t0)
+        metrics.update(gpu_seconds=gpu_s, est_cost_usd=round(gpu_s / 3600 * GPU_PRICE_PER_HOUR, 5),
+                       wall_seconds=time.time() - t0, **result.metrics)
+        hb.stop()
+        api.complete(job_id, attempt, {"width": enc.width, "height": enc.height, "duration_ms": enc.duration_ms,
+                                       "codec": "h264"}, report, metrics)
+    except LeaseLost:
+        log.warning("lease lost for %s; dropping work", job_id)
+    except Cancelled:
+        hb.stop()
+        _safe_fail(api, job_id, attempt, "cancelled", "cancelled", False, metrics)
+    except AdapterError as e:
+        hb.stop()
+        _safe_fail(api, job_id, attempt, e.code, str(e), e.retryable, metrics)
+    except Exception as e:  # noqa: BLE001
+        hb.stop()
+        log.exception("job %s crashed", job_id)
+        _safe_fail(api, job_id, attempt, "worker_exception", repr(e), True, metrics)
+    finally:
+        hb.stop()
+
+
+def _safe_fail(api, job_id, attempt, code, msg, retryable, metrics) -> None:
+    try:
+        api.fail(job_id, attempt, code, msg, retryable, metrics)
+    except LeaseLost:
+        pass
+    except Exception:
+        log.exception("could not report failure; lease expiry will requeue %s", job_id)
+
+
+def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    api = ApiClient(os.environ["API_URL"], os.environ["WORKER_TOKEN"],
+                    os.environ.get("WORKER_ID", f"{socket.gethostname()}-{os.getpid()}"))
+    adapters = load_adapters()
+    healthy = {n: a for n, a in adapters.items() if a.healthcheck().get("ok")}
+    log.info("adapters loaded=%s healthy=%s", list(adapters), list(healthy))
+    stopping = threading.Event()
+    signal.signal(signal.SIGTERM, lambda *_: stopping.set())  # finish current job, then exit (spot preemption)
+    idle = 1.0
+    while not stopping.is_set():
+        try:
+            payload = api.claim(list(healthy), os.environ.get("GPU_PROVIDER"), os.environ.get("GPU_TYPE"))
+        except Exception:
+            log.warning("claim failed", exc_info=True)
+            payload = None
+        if payload is None:
+            time.sleep(idle)
+            idle = min(idle * 1.5, 10.0)
+            continue
+        idle = 1.0
+        workdir = Path(tempfile.mkdtemp(prefix=f"job-{payload['job_id']}-"))
+        try:
+            process(api, healthy, payload, workdir)
+        finally:
+            shutil.rmtree(workdir, ignore_errors=True)  # never keep user media on GPU nodes
+
+
+if __name__ == "__main__":
+    main()

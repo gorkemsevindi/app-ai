@@ -400,7 +400,9 @@ def build_worker_payload(db: Session, job: GenerationJob) -> dict:
     assets = db.execute(select(IdentityAsset).where(IdentityAsset.profile_id == job.profile_id,
                                                     IdentityAsset.status == AssetStatus.accepted)
                         .order_by(IdentityAsset.created_at)).scalars().all()
+    src_key = (ver.params or {}).get("source_clip_key")
     return {
+        "source_video_url": storage.presign_get(src_key, 3600) if src_key else None,
         "job_id": str(job.id),
         "attempt": job.attempts,
         "model": job.model_used,
