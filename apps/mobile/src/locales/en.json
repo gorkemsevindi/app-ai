@@ -1,0 +1,69 @@
+{
+  "app": { "tagline": "Put yourself in what's trending." },
+  "onboarding": {
+    "headline": "Star in today's trends",
+    "sub": "Add a few selfies once. Then tap any template and get a vertical video of you in about a minute.",
+    "step1": "Create your face profile once",
+    "step2": "Pick a trending template",
+    "step3": "Share to TikTok, Reels or Shorts",
+    "age": "I am 18 or older",
+    "terms": "I accept the Terms of Use, Privacy Policy and Community Guidelines",
+    "continue": "Get started"
+  },
+  "auth": {
+    "email": "Email", "password": "Password (min. 8 characters)", "signUp": "Create account", "signIn": "Sign in",
+    "haveAccount": "I already have an account", "noAccount": "Create a new account",
+    "apple": "Continue with Apple", "google": "Continue with Google"
+  },
+  "tabs": { "discover": "Discover", "video": "Your video", "library": "My videos", "profile": "Profile" },
+  "discover": { "credits": "{{count}} credits", "createProfile": "Create your face profile to start", "empty": "No templates here yet." },
+  "categories": { "trending": "Trending", "new": "New", "funny": "Funny", "cinematic": "Cinematic", "dance": "Dance", "fashion": "Fashion", "travel": "Travel", "fantasy": "Fantasy" },
+  "template": { "cost": "{{count}} credits", "eta": "about {{eta}}", "addText": "Add a short caption (optional)", "generate": "Create my video", "pro": "Pro" },
+  "identity": {
+    "title": "Your face profile",
+    "explain": "Pick 5–10 clear photos of yourself: different angles, good light, only you in the frame.",
+    "consent": "These photos show me, or I have the explicit permission of the person shown.",
+    "pick": "Choose photos", "uploading": "Uploading {{done}}/{{total}}", "ready": "Profile ready!",
+    "needMore": "Add {{count}} more photos", "delete": "Delete profile and photos"
+  },
+  "job": {
+    "title": "Your video",
+    "stage": { "queued": "In line", "preparing": "Preparing your photos", "generating": "Creating your video", "finishing": "Final touches", "completed": "Done!", "failed": "Something went wrong", "cancelled": "Cancelled" },
+    "position": "#{{n}} in line", "eta": "About {{eta}} left", "notifyHint": "You can leave this screen — we'll keep working on it.",
+    "cancel": "Cancel", "retry": "Try again", "refunded": "Your credits were refunded.",
+    "download": "Save to Photos", "share": "Share", "report": "Report", "regenerate": "Make another",
+    "reported": "Thanks — our team will review it.", "aiLabel": "AI-generated"
+  },
+  "report": { "title": "What's wrong?", "sexual": "Sexual content", "minor_safety": "Involves a minor", "impersonation": "Impersonation / fake", "harassment": "Harassment", "violence": "Violence", "copyright": "Copyright", "low_quality": "Low quality", "other": "Other" },
+  "multi": {
+    "title": "Your video, new faces",
+    "intro": "Upload a clip you own. We'll find up to {{max}} people so you can choose who to replace with your face profiles.",
+    "rights": "I own this video or have the rights to use it.",
+    "consent": "Everyone whose face will be replaced has agreed to it.",
+    "pick": "Choose a video ({{min}}–{{max}} s)", "analyzing": "Finding people in your video…",
+    "people": "Who should be replaced?", "assign": "Choose a face profile", "keep": "Keep original",
+    "notSelectable": "Can't replace (face too small or not visible)",
+    "preview": "Quick preview ({{credits}} credits)", "generate": "Create video ({{credits}} credits)",
+    "rejected": "We can't use this video", "disabled": "Coming soon in your region."
+  },
+  "profile": { "credits": "Credits", "plan": "Plan", "faceProfiles": "Face profiles", "newProfile": "New face profile", "language": "Language", "signOut": "Sign out", "deleteAccount": "Delete account", "deleteConfirm": "This permanently deletes your account, face profiles and videos. This can't be undone.", "deleteDone": "Your account was deleted." },
+  "paywall": { "title": "Get more credits", "sub": "Pro: monthly credits, priority queue, no watermark.", "comingSoon": "In-app purchases are being set up." },
+  "errors": {
+    "generic": "Something went wrong. Please try again.",
+    "insufficient_credits": "You don't have enough credits for this.",
+    "content_blocked": "That text isn't allowed. Please try something else.",
+    "rate_limited": "Slow down a little and try again in a minute.",
+    "too_many_active_jobs": "Wait for your current videos to finish first.",
+    "queue_full": "We're very busy right now. Please try again in a few minutes.",
+    "profile_not_ready": "Your face profile needs more photos.",
+    "invalid_credentials": "Email or password is incorrect.",
+    "email_taken": "An account with this email already exists.",
+    "consent_required": "Please confirm the checkboxes to continue.",
+    "attestation_required": "Please confirm you have the rights and everyone's consent.",
+    "feature_disabled": "This feature isn't available yet.",
+    "person_not_selectable": "That person can't be replaced in this video.",
+    "too_many_persons": "You picked too many people.",
+    "file_too_large": "That file is too large.",
+    "unsupported_media_type": "That file type isn't supported."
+  }
+}
