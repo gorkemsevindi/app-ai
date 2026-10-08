@@ -4,6 +4,7 @@ import * as Crypto from 'expo-crypto';
 import { tokenStore } from './tokenStore';
 
 const BASE_URL: string =
+  process.env.EXPO_PUBLIC_API_URL ??
   (Constants.expoConfig?.extra as { apiUrl?: string } | undefined)?.apiUrl ?? 'http://localhost:8000';
 
 /** Stable, machine-readable error codes from the API. UI maps them to localized copy. */
