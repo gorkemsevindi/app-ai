@@ -1,4 +1,4 @@
-# Sahne (working name): AI short-drama platform
+# YourStars: AI short-drama platform
 
 **Watch → Create → Earn.** Viewers watch serialized vertical (9:16) micro-dramas. Creators build
 characters and generate episodes in the AI Studio, with:
@@ -25,7 +25,8 @@ This product is **independent** of everything else in this repository. All of it
 | Viewer: feed (for you / trending / following / new / genre / search), series pages with OG metadata, HLS player, resume, history, follow, comments, reports | ✅ web |
 | Money: first-5-free paywall, sandbox store with signed receipts + refund notifications, entitlements, double-entry ledger, 60/40 net allocation, hold → available, KYC-gated payouts | ✅ sandbox |
 | Trust & safety: moderation rules, report queue, takedown propagation, consent-gated likeness/face swap, revocation, audit log, AI labels + provenance | ✅ |
-| Real AI providers (Claude, Veo, ElevenLabs, sync.so, Lyria …) | Adapters / plan ready; **keys and contracts needed**, see [DECISIONS-NEEDED.md](docs/DECISIONS-NEEDED.md) |
+| **Realistic route**: photoreal fictional actors, natural speech + lip-sync in one pass (Nano Banana reference portraits → keyframes → Veo 3.1 image→video with native audio) | ✅ implemented, contract-tested with a fake SDK client; **live run needs `GEMINI_API_KEY`** |
+| Other AI providers (Claude writer, ElevenLabs voices, sync.so lip-sync, Lyria) | Adapters / plan ready; keys and contracts needed, see [DECISIONS-NEEDED.md](docs/DECISIONS-NEEDED.md) |
 | Mobile app (Expo), Apple/Google IAP, coins | Next slices |
 
 Every local or mock component is marked in episode provenance (`mock_components`) and in the Studio UI.

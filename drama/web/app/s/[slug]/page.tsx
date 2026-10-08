@@ -8,17 +8,17 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   const { slug } = await params;
   try {
     const r = await fetch(`${API}/series/${slug}`, { cache: "no-store" });
-    if (!r.ok) return { title: "Sahne" };
+    if (!r.ok) return { title: "YourStars" };
     const s = await r.json();
     return {
-      title: `${s.title} — Sahne`,
+      title: `${s.title} — YourStars`,
       description: s.logline,
       alternates: { canonical: `/s/${s.slug}` },
       openGraph: { title: s.title, description: s.logline, images: s.og?.image ? [s.og.image] : [], type: "video.tv_show" },
-      other: { "al:ios:url": `sahne://s/${s.slug}`, "al:android:url": `sahne://s/${s.slug}` },
+      other: { "al:ios:url": `yourstars://s/${s.slug}`, "al:android:url": `yourstars://s/${s.slug}` },
     };
   } catch {
-    return { title: "Sahne" };
+    return { title: "YourStars" };
   }
 }
 

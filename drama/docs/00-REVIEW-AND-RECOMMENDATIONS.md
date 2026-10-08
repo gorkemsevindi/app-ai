@@ -73,8 +73,8 @@ Date: 2026-10-08. My review of the Master Specification v1.0, ordered by impact.
 - **Timeline.** The 14-week plan is realistic for the scope in this repo with mocked providers. With
   real providers, store review and payout KYC, plan **5–6 months to public launch**. Apple review of
   a UGC + AI + IAP app usually takes several rounds.
-- **Brand.** "Sahne" is a working name only. It needs a trademark search in TR (TÜRKPATENT), the EU
-  (EUIPO) and the US, plus domain and store-name availability. **[DECISION]**
+- **Brand.** The owner chose **YourStars** (logo supplied 2026-10-08). It still needs a trademark search in
+  TR (TÜRKPATENT), the EU (EUIPO) and the US, plus domain and store-name availability. **[DECISION]**
 
 ## D. What I would keep exactly as specified
 

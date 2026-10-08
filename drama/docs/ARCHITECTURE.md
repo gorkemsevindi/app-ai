@@ -149,3 +149,32 @@ Every event carries a unique `dedup_key`.
 | Auditing | Audit events for rights, ledger, moderation and KYC |
 | Account deletion | Scrubs PII. The ledger is kept, keyed by opaque id only |
 | Secrets | Come from the environment, never from the repo. The defaults are dev-only strings, and production must override them |
+
+## Realistic route (photoreal actors): `pipeline/realistic.py`
+
+Selected per job with `route=realistic`. It uses one provider account: the Google Gemini API (`GEMINI_API_KEY`).
+
+| Step | What happens | Paid call |
+|---|---|---|
+| references | A photoreal reference portrait per character, generated from Character DNA (Nano Banana). Reused while the DNA hash is unchanged; this is the identity lock | 1 image per new or changed character |
+| shotplan | Scene 1 opens on an establishing shot. Dialogue is grouped into clips of up to two consecutive lines by different speakers, with Veo lengths of 4, 6 or 8 s. A 60 s script becomes about 9–11 clips | — |
+| keyframes | A 9:16 film still per clip, conditioned on the characters' reference portraits (identity) plus location, lighting, emotion and framing | 1 image per clip |
+| video | Veo 3.1 image→video per clip with `generate_audio=True`. The prompt carries the exact words, language, speaker, tone and expression, so speech, lip-sync and facial performance come out of one pass | Seconds × price |
+| assemble | Normalise clips to 9:16 at 24 fps, concatenate, split picture and production audio, build caption cues | Platform render fee |
+| score → mixdown → captions → compose → qc → package | Shared with the 2D route: music bed ducked under production audio, −14 LUFS, karaoke captions, QC, HLS | — |
+
+**Billing and caching:**
+- Every paid call is checked against the job's spend cap and the wallet *before* it is made.
+- Each call is billed once (ledger key `job:{id}:step:{kind}:{hash}`).
+- Results are cached by content hash, so re-renders and resumed jobs reuse finished images and clips and are not billed again.
+
+**Failure handling:**
+- Non-retryable provider errors fail fast with a specific code: `provider.safety_filtered`, `provider.auth`, `provider.model_not_found`, `credits.max_spend_exceeded`.
+- `provider.model_not_found` lists the models the key can actually use.
+
+**Known limits until verified with a live key:**
+- Voice consistency across clips (native audio is generated per clip).
+- Turkish speech quality.
+- Caption timing is energy-based, with no ASR yet.
+
+For full voice consistency, the next step is the dubbed variant: silent Veo, then ElevenLabs voice id per character, then sync.so lip-sync. It needs `api.elevenlabs.io` and `api.sync.so` allowed in the environment's network policy, plus a public media URL (R2/S3).

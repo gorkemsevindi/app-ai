@@ -16,6 +16,13 @@ function CharacterCard({ c, onChange }: { c: any; onChange: () => void }) {
   const [voice, setVoice] = useState(c.voice);
   const [err, setErr] = useState<string | null>(null);
   const [sheet, setSheet] = useState<string | null>(c.reference_sheet_url);
+  const [photo, setPhoto] = useState<string | null>(c.reference_photo_url);
+  const [busy, setBusy] = useState(false);
+  const makePhoto = async () => {
+    setBusy(true); setErr(null);
+    try { setPhoto((await api(`/studio/characters/${c.id}/reference-photo`, { body: {} })).url); } catch (e: any) { setErr(`${e.code}: ${e.message}`); }
+    setBusy(false);
+  };
   const save = async () => {
     setErr(null);
     try { await api(`/studio/characters/${c.id}`, { method: "PATCH", body: { look, voice } }); onChange(); } catch (e: any) { setErr(e.message); }
@@ -51,6 +58,8 @@ function CharacterCard({ c, onChange }: { c: any; onChange: () => void }) {
         </button>
         <button className="ghost" onClick={() => api(`/studio/characters/${c.id}/reference-sheet`, { body: {} }).then((r) => setSheet(r.url))}>{t("referenceSheet")}</button>
       </div>
+      <button className="primary" disabled={busy} onClick={makePhoto}>{busy ? "…" : "📷 " + t("realPortrait")}</button>
+      {photo && <img src={photo} alt={c.name} style={{ width: "100%", aspectRatio: "9/16", objectFit: "cover", borderRadius: 10 }} />}
       {sheet && <img src={sheet} alt="" style={{ width: "100%", borderRadius: 8 }} />}
       <span className="muted small">DNA {c.dna_hash.slice(0, 10)}</span>
       {err && <p className="err">{err}</p>}
@@ -119,9 +128,10 @@ function EpisodeRow({ ep, characters, reload }: { ep: any; characters: any[]; re
     return () => { alive = false; };
   }, [ep.latest_job?.id, ep.status, reload, refresh]);
 
+  const [route, setRoute] = useState<"realistic" | "preview_2d">("realistic");
   const render = async (quality: string) => {
     setErr(null);
-    try { await api("/studio/generations", { body: { episode_id: ep.id, quality } }); reload(); } catch (e: any) { setErr(`${e.code}: ${e.message}`); }
+    try { await api("/studio/generations", { body: { episode_id: ep.id, quality, route } }); reload(); } catch (e: any) { setErr(`${e.code}: ${e.message}`); }
   };
   const act = (fn: () => Promise<any>) => fn().then(reload).catch((e) => setErr(e.message));
   const editable = !["published", "in_review", "approved", "rendering"].includes(ep.status);
@@ -139,7 +149,11 @@ function EpisodeRow({ ep, characters, reload }: { ep: any; characters: any[]; re
       <p className="muted small" style={{ margin: 0 }}>{ep.synopsis}</p>
       <div className="row">
         <button className="ghost" onClick={() => setOpen(!open)}>✎ {t("script")}</button>
-        <button className="ghost" onClick={() => api(`/studio/episodes/${ep.id}/estimate`, { body: { quality: "preview" } }).then(setEst)}>{t("estimate")}</button>
+        <select style={{ width: "auto" }} value={route} onChange={(e) => setRoute(e.target.value as any)}>
+          <option value="realistic">🎬 {t("routeRealistic")}</option>
+          <option value="preview_2d">✏️ {t("route2d")}</option>
+        </select>
+        <button className="ghost" onClick={() => api(`/studio/episodes/${ep.id}/estimate`, { body: { quality: "preview", route } }).then(setEst).catch((e) => setErr(e.message))}>{t("estimate")}</button>
         <button className="primary" disabled={!editable} onClick={() => render("preview")}>{t("render")} · {t("preview")}</button>
         <button disabled={!editable} onClick={() => render("final")}>{t("render")} · {t("final")}</button>
         {ep.status === "rendered" && <button className="ghost" onClick={() => api(`/studio/episodes/${ep.id}/preview`).then(setPreview)}>▶ {t("preview")}</button>}
@@ -149,8 +163,11 @@ function EpisodeRow({ ep, characters, reload }: { ep: any; characters: any[]; re
       </div>
       {est && (
         <div className="small muted">
-          ≈{est.est_seconds}s · {est.dialogue_words} words · <b>{est.credits} {t("credits")}</b> ({est.route}) · balance {est.balance}
-          <br />Premium route ≈ ${est.shadow_estimates_usd.premium_route.total_usd} · Budget route ≈ ${est.shadow_estimates_usd.budget_route.total_usd} (shadow, not charged)
+          ≈{est.est_seconds}s · {est.dialogue_words} words{est.shots ? ` · ${est.shots} shots` : ""} · <b>{est.credits} {t("credits")}</b> · balance {est.balance}
+          <br />{est.route}
+          {est.provider_cost_usd && <><br />Provider cost ≈ ${est.provider_cost_usd.total} (video ${est.provider_cost_usd.video} + images ${est.provider_cost_usd.images})</>}
+          {est.shadow_estimates_usd && <><br />Realistic premium ≈ ${est.shadow_estimates_usd.premium_route.total_usd}</>}
+          {est.realistic_available && !est.realistic_available.available && <><br /><span className="err">{t("realisticMissing")}: {est.realistic_available.missing}</span></>}
         </div>
       )}
       {job && (
@@ -189,7 +206,7 @@ export default function Project() {
       <h1>{p.title}</h1>
       <p className="muted">{p.logline}</p>
       <p className="small muted">{p.bible?.season_arc}</p>
-      <div className="mock">{t("mockLabel")}</div>
+      <div className="mock">{t("routeHelp")}</div>
       <h2>{t("characters")}</h2>
       <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))" }}>
         {p.characters.map((c: any) => <CharacterCard key={`${c.id}-${c.version}-${c.locked}`} c={c} onChange={reload} />)}

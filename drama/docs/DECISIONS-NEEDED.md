@@ -18,8 +18,9 @@ each one is an environment variable or a per-series setting.
 | 9 | Originals programme | — | Fund 10–20 creators for the first 3–6 months |
 | 10 | Real-likeness / face swap at launch | Consent flow on, provider not wired | Keep it off at launch |
 | 11 | Legal entity for payments and payouts | — | TR company for iyzico/PayTR, plus a US/EU entity for Stripe Connect payouts |
-| 12 | Brand | "Sahne" (working name) | Trademark search in TR/EU/US first |
+| 12 | Brand | **YourStars** (chosen by owner; vector rendition of the logo in the web app) | Trademark search in TR/EU/US; send the original logo file to replace the vector rendition |
 | 13 | Default video route | Local preview | Budget route (Veo 3.1 Lite + ElevenLabs + LatentSync) for previews; mid route (Veo 3.1 Fast) for finals |
+| 14 | Refund policy for realistic renders that fail | Platform refunds all credits of a failed job (provider cost is absorbed) | Refund on platform/provider errors; no refund when the provider's safety filter blocks the creator's script |
 
 ## Accounts and API keys to open
 
@@ -28,7 +29,8 @@ Nothing is mocked silently. Each item below changes a specific status in `/admin
 | Service | Unlocks | Env / config |
 |---|---|---|
 | Anthropic Console | Real script writing (Claude Opus 5.5) | `ANTHROPIC_API_KEY`, `DRAMA_LLM_PROVIDER=anthropic` |
-| Google Cloud + Vertex AI billing | Veo 3.1 video, Nano Banana reference images, Lyria music, Chirp TTS | Service account (adapter to build) |
+| **Google AI Studio API key (Gemini API, billing on)** | **Realistic route now: Nano Banana portraits/keyframes + Veo 3.1 video with speech** | `GEMINI_API_KEY` (adapter implemented) |
+| Google Cloud + Vertex AI (optional, later) | Enterprise quotas, Lyria music, Chirp TTS | Service account |
 | ElevenLabs (API plan) | Turkish/English character voices, PVC voice cloning with consent | `ELEVENLABS_API_KEY` (adapter to build) |
 | sync.so | Lip-sync on generated video | `SYNC_API_KEY` |
 | RunPod or Modal | Self-hosted LatentSync / WhisperX | API key |

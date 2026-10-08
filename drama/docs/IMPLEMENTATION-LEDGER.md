@@ -9,7 +9,7 @@
 | Check | Result |
 |---|---|
 | `ruff check .` | clean |
-| `pytest`: 18 tests on SQLite | pass |
+| `pytest`: 23 tests on SQLite | pass |
 | `pytest` on PostgreSQL 16 | 17/17 pass (run before the 18th test was added) |
 | `alembic upgrade head` + `alembic check` on PostgreSQL | applied, no drift |
 | `tsc --noEmit` + `next build` | pass |

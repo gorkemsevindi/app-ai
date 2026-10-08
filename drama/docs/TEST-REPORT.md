@@ -8,7 +8,7 @@ PostgreSQL 16 and SQLite, Node 22, Chromium (Playwright).
 | Suite | Result |
 |---|---|
 | `ruff check .` | clean |
-| `pytest` on SQLite | **18 passed** (final run, includes the feed regression test) |
+| `pytest` on SQLite | **23 passed** (includes the feed regression test and 5 realistic-route contract tests) |
 | `pytest` on PostgreSQL 16 (`TEST_DATABASE_URL`) | **17 passed** (353 s, including three real 60 s renders; run before the feed test was added) |
 | `alembic upgrade head` + `alembic check` on PostgreSQL | 29 tables, no drift |
 | `tsc --noEmit`, `next build` | pass |

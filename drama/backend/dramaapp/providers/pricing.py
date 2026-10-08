@@ -66,3 +66,17 @@ def route_estimate(route: dict, *, seconds: float, chars: int, images: int) -> d
     }
     total = int(sum(lines.values()))
     return {"line_items_usd": {k: round(v / 1e6, 2) for k, v in lines.items()}, "total_usd": round(total / 1e6, 2)}
+
+
+def veo_price_micros_per_s(model: str, audio: bool = True) -> int:
+    """Veo list price per output second (V, Vertex pricing page, 2026-10-08). Upper bound of the range."""
+    m = model.lower()
+    if "lite" in m:
+        return 80_000 if audio else 50_000
+    if "fast" in m:
+        return 120_000 if audio else 100_000
+    return 400_000 if audio else 200_000
+
+
+def image_price_micros(model: str) -> int:
+    return 134_000 if "pro" in model.lower() else 67_000

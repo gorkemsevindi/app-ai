@@ -10,7 +10,7 @@ EXTERNAL_REQUIREMENTS = {
     # provider id: (env var / contract needed, capability)
     "anthropic": ("ANTHROPIC_API_KEY", "llm"),
     "elevenlabs": ("ELEVENLABS_API_KEY", "tts"),
-    "google_veo": ("GOOGLE_CLOUD_PROJECT + Vertex AI billing", "video"),
+    "google_gemini": ("GEMINI_API_KEY", "video+image (Veo 3.1, Nano Banana)"),
     "sync_labs": ("SYNC_API_KEY", "lipsync"),
     "google_lyria": ("GOOGLE_CLOUD_PROJECT + Vertex AI billing", "music"),
     "deepgram": ("DEEPGRAM_API_KEY", "asr"),
@@ -53,6 +53,12 @@ def music():
         from .music_local import ProceduralMusic
         return ProceduralMusic()
     raise ProviderUnavailable(p, EXTERNAL_REQUIREMENTS.get(p, ("adapter not implemented",))[0])
+
+
+def google_media():
+    """Realistic route provider (Nano Banana + Veo). Tests replace this function with a fake."""
+    from .google_media import GoogleMedia
+    return GoogleMedia()
 
 
 def status() -> list[dict]:

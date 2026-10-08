@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { Logo } from "./Logo";
 import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
 
@@ -9,7 +10,7 @@ export function Nav() {
   const { t, lang, setLang } = useI18n();
   return (
     <nav className="nav">
-      <Link href="/" className="brand">SAH<span>NE</span></Link>
+      <Link href="/" className="brand" aria-label="YourStars"><Logo /></Link>
       {me && me.role !== "viewer" && <Link href="/studio">{t("studio")}</Link>}
       {me && me.role !== "viewer" && <Link href="/creator" className="hide-sm">{t("earnings")}</Link>}
       {me?.role === "admin" && <Link href="/admin" className="hide-sm">{t("admin")}</Link>}

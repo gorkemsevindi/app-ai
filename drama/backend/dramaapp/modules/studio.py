@@ -145,7 +145,10 @@ def char_out(db: Session, ch: Character) -> dict:
     from ..models import Asset
     ref = db.scalar(select(Asset).where(Asset.character_id == ch.id, Asset.kind == "character_ref")
                     .order_by(Asset.created_at.desc()))
-    return {"id": ch.id, "key": ch.dna.get("key"), "name": ch.name, "role": ch.role, "personality": ch.personality,
+    from ..pipeline.realistic import reference_asset
+    photo = reference_asset(db, ch.id, orch.dna_hash(ch.dna.get("look", {}), ch.voice))
+    return {"id": ch.id, "key": ch.dna.get("key"), "name": ch.name,
+            "reference_photo_url": signed_url(photo.storage_key) if photo else None, "role": ch.role, "personality": ch.personality,
             "look": ch.dna.get("look"), "voice": ch.voice, "version": ch.version, "locked": ch.locked,
             "likeness_source": ch.likeness_source, "blocked_reason": ch.blocked_reason,
             "dna_hash": orch.dna_hash(ch.dna.get("look", {}), ch.voice),
@@ -409,6 +412,7 @@ def revert_script(eid: str, version: int, user: User = Depends(creator_user), db
 # ------------------------------------------------------------------------------------------ generation
 class EstimateIn(BaseModel):
     quality: str = Field("preview", pattern="^(preview|final)$")
+    route: str = Field("preview_2d", pattern="^(preview_2d|realistic)$")
 
 
 @router.post("/episodes/{eid}/estimate")
@@ -418,8 +422,21 @@ def estimate(eid: str, body: EstimateIn, user: User = Depends(creator_user), db:
         spec = orch.build_spec(db, ep)
     except orch.StepError as e:
         raise AppError(e.code, e.detail, 422) from e
+    from ..pipeline import realistic
     from . import ledger
-    return {**orch.estimate(spec, body.quality), "balance": ledger.credit_balance(db, user.id)}
+    est = realistic.estimate(spec, body.quality, db) if body.route == "realistic" else orch.estimate(spec, body.quality)
+    if body.route == "preview_2d":
+        est["shadow_route_note"] = "2D preview engine; choose route=realistic for photoreal actors"
+    return {**est, "balance": ledger.credit_balance(db, user.id),
+            "realistic_available": _realistic_available()}
+
+
+def _realistic_available() -> dict:
+    try:
+        orch.registry.google_media()
+        return {"available": True}
+    except ProviderUnavailable as e:
+        return {"available": False, "missing": e.missing}
 
 
 class GenerationIn(BaseModel):
@@ -427,10 +444,12 @@ class GenerationIn(BaseModel):
     quality: str = Field("preview", pattern="^(preview|final)$")
     max_spend_credits: int | None = Field(None, ge=1)
     burn_captions: bool = True
+    route: str = Field("preview_2d", pattern="^(preview_2d|realistic)$")
 
 
 def job_out(job: GenerationJob) -> dict:
     return {"id": job.id, "episode_id": job.episode_id, "status": job.status, "quality": job.quality,
+            "route": job.params.get("route", "preview_2d"),
             "estimate_credits": job.estimate_credits, "spent_credits": job.spent_credits,
             "max_spend_credits": job.max_spend_credits, "attempts": job.attempts, "error_code": job.error_code,
             "error_detail": job.error_detail, "output": job.output, "created_at": job.created_at,
@@ -455,9 +474,12 @@ def create_generation(body: GenerationIn, user: User = Depends(creator_user), db
     except ProviderUnavailable as e:
         raise _provider_error(e) from e
     try:
-        job = orch.create_job(db, owner_id=user.id, ep=ep, quality=body.quality, max_spend=body.max_spend_credits)
+        job = orch.create_job(db, owner_id=user.id, ep=ep, quality=body.quality, max_spend=body.max_spend_credits,
+                              route=body.route)
     except orch.StepError as e:
         raise AppError(e.code, e.detail, 422) from e
+    except ProviderUnavailable as e:
+        raise _provider_error(e) from e
     job.params = {**job.params, "burn_captions": body.burn_captions}
     db.commit()
     from ..worker import kick
@@ -532,3 +554,46 @@ def preview(eid: str, user: User = Depends(creator_user), db: Session = Depends(
             "hls_url": signed_url(f"{hls.storage_key}/master.m3u8", ttl_s=3600) if hls else None,
             "mp4_url": _asset_url(db, ep.video_asset_id), "captions_url": _asset_url(db, ep.captions_asset_id),
             "poster_url": _asset_url(db, ep.thumbnail_asset_id)}
+
+
+@router.post("/characters/{cid}/reference-photo")
+def reference_photo(cid: str, user: User = Depends(creator_user), db: Session = Depends(get_db)):
+    """Photoreal reference portrait (Nano Banana) for the current DNA. Becomes the identity lock for the
+    realistic route; regenerated only when the DNA changes. Billed in credits."""
+    from ..pipeline import realistic
+    from ..providers.google_media import ProviderError
+    from ..providers.pricing import micros_to_credits
+    from . import ledger
+    ch = db.get(Character, cid)
+    if not ch:
+        raise AppError("not_found", "Character not found", 404)
+    _own_series(db, ch.series_id, user)
+    h = orch.dna_hash(ch.dna.get("look", {}), ch.voice)
+    existing = realistic.reference_asset(db, ch.id, h)
+    if existing:
+        return {"url": signed_url(existing.storage_key), "reused": True}
+    try:
+        media = orch.registry.google_media()
+    except ProviderUnavailable as e:
+        raise _provider_error(e) from e
+    cost = micros_to_credits(realistic.image_price_micros(get_settings().image_model))
+    if ledger.credit_balance(db, user.id) < cost:
+        raise AppError("credits.insufficient", "Not enough credits", 402, needed=cost)
+    out = realistic.cache_dir("refs") / f"{h}.png"
+    spec_char = {"name": ch.name, "look": ch.dna.get("look", {}), "voice": ch.voice}
+    if not out.exists():
+        try:
+            info = media.image(
+                f"Photorealistic head-and-shoulders portrait photograph of {realistic.describe(spec_char)}. Facing the "
+                "camera, neutral expression, soft studio key light, plain dark grey background, sharp focus, natural "
+                "skin texture. Fictional person, not a celebrity. No text.", [], out, seed=int(h[:6], 16))
+        except ProviderError as e:
+            raise AppError(e.code, e.detail, 502) from e
+        ledger.consume_credits(db, user.id, micros_to_credits(info.cost_usd_micros), key=f"refphoto:{ch.id}:{h}",
+                               memo="reference portrait")
+        db.add(ProviderCall(capability="image", provider=info.provider, model=info.model, units=info.units,
+                            cost_usd_micros=info.cost_usd_micros, seed=info.seed))
+    a = put_file(db, out, f"characters/{ch.id}/photo-{h[:12]}.png", "character_ref_photo", user.id,
+                 {"dna_hash": h, "provider": "google_gemini", "synthetic": True}, character_id=ch.id)
+    db.commit()
+    return {"url": signed_url(a.storage_key), "reused": False}

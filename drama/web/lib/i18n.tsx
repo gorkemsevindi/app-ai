@@ -16,6 +16,8 @@ const dict = {
     email: "E-posta", password: "Şifre", name: "Ad", asCreator: "İçerik üreticisi olarak katıl",
     pending: "Bekleyen", available: "Çekilebilir", requestPayout: "Ödeme talep et", empty: "Henüz içerik yok.",
     referenceSheet: "Mimik kütüphanesi", mockLabel: "YEREL ÖNİZLEME MOTORU — üretken video sağlayıcısı değil",
+    realPortrait: "Gerçekçi portre üret", routeRealistic: "Gerçekçi (Veo)", route2d: "2D taslak (ücretsiz)",
+    realisticMissing: "Gerçekçi video için eksik", routeHelp: "🎬 Gerçekçi: fotogerçekçi oyuncular, doğal konuşma ve lip-sync (Google Veo 3.1 + Nano Banana; API anahtarı gerekir). ✏️ 2D taslak: ücretsiz yerel önizleme, senaryo ve zamanlama kontrolü için.",
   },
   en: {
     forYou: "For You", trending: "Trending", following: "Following", new: "New", studio: "Studio", earnings: "Earnings",
@@ -30,6 +32,8 @@ const dict = {
     email: "Email", password: "Password", name: "Name", asCreator: "Join as a creator",
     pending: "Pending", available: "Available", requestPayout: "Request payout", empty: "Nothing here yet.",
     referenceSheet: "Expression library", mockLabel: "LOCAL PREVIEW ENGINE — not a generative video provider",
+    realPortrait: "Generate realistic portrait", routeRealistic: "Realistic (Veo)", route2d: "2D draft (free)",
+    realisticMissing: "Missing for realistic video", routeHelp: "🎬 Realistic: photoreal actors, natural speech and lip-sync (Google Veo 3.1 + Nano Banana; needs an API key). ✏️ 2D draft: free local preview for checking script and timing.",
   },
 };
 export type Lang = keyof typeof dict;

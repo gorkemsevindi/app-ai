@@ -35,6 +35,8 @@ from ..models import (
 from ..modules import ledger
 from ..modules.moderation_rules import check_text
 from ..providers import registry
+from ..providers.base import ProviderUnavailable
+from ..providers.google_media import ProviderError
 from ..providers.pricing import (
     BUDGET_ROUTE,
     LOCAL_COMPUTE_MICROS_PER_RENDER_SECOND,
@@ -48,6 +50,10 @@ from . import render as R
 from .timeline import DialogueCue, plan, to_manifest
 
 STEPS = ["preflight", "voice", "plan", "music", "performance", "mix", "captions", "compose", "qc", "package"]
+# realistic route: photoreal fictional actors (Nano Banana + Veo native audio), see pipeline/realistic.py
+STEPS_REALISTIC = ["preflight", "references", "shotplan", "keyframes", "video", "assemble", "score", "mixdown",
+                   "captions", "compose", "qc", "package"]
+ROUTES = ("preview_2d", "realistic")
 
 
 class Cancelled(Exception):
@@ -124,14 +130,20 @@ def estimate(spec: dict, quality: str) -> dict:
 
 
 # ------------------------------------------------------------------------------------------ job lifecycle
-def create_job(db: Session, *, owner_id: str, ep: Episode, quality: str, max_spend: int | None) -> GenerationJob:
+def create_job(db: Session, *, owner_id: str, ep: Episode, quality: str, max_spend: int | None,
+               route: str = "preview_2d") -> GenerationJob:
     from ..errors import AppError
+    from . import realistic
 
     spec = build_spec(db, ep)
     for k, c in spec["characters"].items():
         if c["blocked_reason"]:
             raise AppError("rights.character_blocked", f"Character '{k}' is blocked: {c['blocked_reason']}", 403)
-    est = estimate(spec, quality)
+    if route == "realistic":
+        registry.google_media()  # raises ProviderUnavailable (-> 503) before any job is created
+        est = realistic.estimate(spec, quality, db)
+    else:
+        est = estimate(spec, quality)
     s = get_settings()
     bal = ledger.credit_balance(db, owner_id)
     if bal < est["credits"]:
@@ -145,9 +157,9 @@ def create_job(db: Session, *, owner_id: str, ep: Episode, quality: str, max_spe
         raise AppError("credits.max_spend_too_low", "max_spend is below the preflight estimate", 400,
                        estimate=est["credits"])
     job = GenerationJob(owner_id=owner_id, episode_id=ep.id, kind="episode_render", quality=quality,
-                        params={"spec": spec, "estimate": est}, estimate_credits=est["credits"],
+                        params={"spec": spec, "estimate": est, "route": route}, estimate_credits=est["credits"],
                         max_spend_credits=limit, priority=50 if quality == "preview" else 100)
-    for i, name in enumerate(STEPS):
+    for i, name in enumerate(STEPS_REALISTIC if route == "realistic" else STEPS):
         job.steps.append(JobStep(seq=i, name=name))
     db.add(job)
     ep.status = "rendering"
@@ -190,7 +202,9 @@ def run_job(db: Session, job: GenerationJob, *, stop_after: str | None = None,
     """Execute remaining steps. `stop_after` / `fail_hook` exist for crash/resume tests."""
     spec = job.params["spec"]
     wd = workdir(job.id)
-    ctx = {"db": db, "job": job, "spec": spec, "wd": wd}
+    ctx = {"db": db, "job": job, "spec": spec, "wd": wd,
+           "record": lambda step, cap, info: (_record_call(db, job, step, cap, info), db.commit())}
+    realistic_route = job.params.get("route") == "realistic"
     if job.status not in ("running",):
         job.status = "running"
         job.started_at = job.started_at or now()
@@ -205,7 +219,7 @@ def run_job(db: Session, job: GenerationJob, *, stop_after: str | None = None,
         if step.status == "done" and _outputs_exist(wd, step.manifest):
             continue
         est = job.params["estimate"]["breakdown_credits"]
-        step_cost = _step_credits(step.name, est)
+        step_cost = 0 if realistic_route else _step_credits(step.name, est)  # realistic bills per provider call
         if job.spent_credits + step_cost > job.max_spend_credits:
             _fail(db, job, step, StepError("credits.max_spend_exceeded", "Job spend cap reached", retryable=False))
             return job
@@ -221,6 +235,12 @@ def run_job(db: Session, job: GenerationJob, *, stop_after: str | None = None,
             return job
         except StepError as e:
             _fail(db, job, step, e)
+            return job
+        except ProviderError as e:
+            _fail(db, job, step, StepError(e.code, e.detail, retryable=e.retryable))
+            return job
+        except ProviderUnavailable as e:
+            _fail(db, job, step, StepError("provider.unavailable", str(e), retryable=False))
             return job
         except Exception as e:  # noqa: BLE001 - provider/ffmpeg errors become retryable step failures
             _fail(db, job, step, StepError("step.exception", f"{type(e).__name__}: {e}"[:2000]))
@@ -489,6 +509,34 @@ def step_package(ctx) -> dict:
     return {"assets": [video.id, hls.id, vtt.id, thumb.id], "outputs": ["final.mp4", "thumb.jpg"]}
 
 
+def step_score(ctx) -> dict:
+    """Realistic route: music bed only (Veo already rendered production sound and ambience)."""
+    spec, wd, db, job = ctx["spec"], ctx["wd"], ctx["db"], ctx["job"]
+    tl = json.loads((wd / "timeline.json").read_text())
+    mp = registry.music()
+    mood = spec["scenes"][0].get("mood", "tense") if spec["scenes"] else "tense"
+    info = mp.compose(mood=mood, genre=spec["genre"], duration=tl["duration"], seed=spec["seed"], out=wd / "music.wav")
+    _record_call(db, job, "score", "music", info)
+    db.commit()
+    return {"mood": mood, "outputs": ["music.wav"]}
+
+
+def step_mixdown(ctx) -> dict:
+    wd = ctx["wd"]
+    info = R.mix_audio(wd / "dialogue.wav", wd / "music.wav", wd / "ambience.wav", wd / "mix.m4a")
+    return {**info, "outputs": ["mix.m4a"]}
+
+
+def _realistic(name: str):
+    def call(ctx):
+        from . import realistic
+        return getattr(realistic, f"step_{name}")(ctx)
+    return call
+
+
 STEP_FUNCS = {"preflight": step_preflight, "voice": step_voice, "plan": step_plan, "music": step_music,
+              "references": _realistic("references"), "shotplan": _realistic("shotplan"),
+              "keyframes": _realistic("keyframes"), "video": _realistic("video"), "assemble": _realistic("assemble"),
+              "score": step_score, "mixdown": step_mixdown,
               "performance": step_performance, "mix": step_mix, "captions": step_captions, "compose": step_compose,
               "qc": step_qc, "package": step_package}

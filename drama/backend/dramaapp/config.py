@@ -28,6 +28,19 @@ class Settings(BaseSettings):
     video_provider: str = "studio_preview_local"  # local 2D performance renderer
     lipsync_provider: str = "viseme_local"
 
+    # --- realistic route (Google Gemini API: Nano Banana images + Veo video with native audio) -------
+    # Model ids change between preview and GA; they are validated against the account's model list
+    # at first use and the error names the models that are actually available.
+    gemini_api_key: str | None = None  # also read from GEMINI_API_KEY / GOOGLE_API_KEY
+    image_model: str = "gemini-3.1-flash-image-preview"  # "Nano Banana 2"
+    video_model_preview: str = "veo-3.1-fast-generate-preview"
+    video_model_final: str = "veo-3.1-generate-preview"
+    video_resolution_preview: str = "720p"
+    video_resolution_final: str = "1080p"
+    veo_poll_seconds: float = 10.0
+    veo_timeout_seconds: int = 900
+    max_shot_seconds: int = 8  # Veo clip lengths: 4, 6 or 8 s
+
     # --- generation budget / abuse controls ---------------------------------------------------------
     max_render_retries: int = 2
     daily_spend_cap_credits: int = 5_000  # per creator account, credits

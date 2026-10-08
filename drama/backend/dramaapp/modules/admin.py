@@ -131,6 +131,24 @@ def set_kyc(uid: str, body: KycIn, admin: User = Depends(admin_user), db: Sessio
     return {"ok": True}
 
 
+class CreditGrant(BaseModel):
+    credits: int = Field(gt=0, le=1_000_000)
+    reason: str = Field(min_length=3, max_length=200)
+
+
+@router.post("/creators/{uid}/credits")
+def grant_credits(uid: str, body: CreditGrant, admin: User = Depends(admin_user), db: Session = Depends(get_db)):
+    """Manual credit grant (Originals programme, support, testing). Audited."""
+    from ..models import uid as new_id
+    if not db.get(User, uid):
+        raise AppError("not_found", "User not found", 404)
+    ledger.grant_credits(db, uid, body.credits, key=f"admin_grant:{new_id()}", memo=body.reason)
+    db.add(AuditEvent(actor_id=admin.id, action="credits.granted", target_type="user", target_id=uid,
+                      data=body.model_dump()))
+    db.commit()
+    return {"balance": ledger.credit_balance(db, uid)}
+
+
 @router.get("/payouts")
 def payouts(admin: User = Depends(admin_user), db: Session = Depends(get_db)):
     return [payout_out(p) | {"creator_id": p.creator_id} for p in db.scalars(select(Payout))]
