@@ -3,6 +3,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 RUN useradd -r -u 10001 app
 WORKDIR /srv
 COPY services/api/pyproject.toml ./
+# The base image ships an older setuptools whose vendored wheel/jaraco.context have HIGH CVEs (Trivy).
+RUN pip install --no-cache-dir --upgrade "setuptools>=80"
 RUN pip install --no-cache-dir "fastapi>=0.115" "uvicorn[standard]>=0.30" "sqlalchemy>=2.0" "psycopg[binary]>=3.2" \
     "alembic>=1.13" "pydantic-settings>=2.4" "pyjwt[crypto]>=2.9" "boto3>=1.35" "redis>=5.0" "httpx>=0.27" \
     "python-multipart>=0.0.9" "email-validator>=2.2"

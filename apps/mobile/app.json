@@ -1,15 +1,14 @@
 {
   "expo": {
-    "name": "AI Video (working title)",
-    "slug": "aivideo",
-    "version": "0.1.0",
+    "name": "YourStars",
+    "slug": "yourstars",
+    "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.example.aivideo",
-      "usesAppleSignIn": true,
+      "bundleIdentifier": "com.yourstarverse.yourstars",
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "Choose photos of yourself to create your identity profile and videos you want to edit.",
         "NSPhotoLibraryAddUsageDescription": "Save your finished videos to your photo library.",
@@ -25,7 +24,7 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.example.aivideo",
+      "package": "com.yourstarverse.yourstars",
       "permissions": [],
       "blockedPermissions": [
         "android.permission.RECORD_AUDIO",
@@ -58,9 +57,12 @@
         }
       ]
     ],
-    "scheme": "aivideo",
+    "scheme": "yourstars",
     "extra": {
-      "apiUrl": "http://localhost:8000"
+      "apiUrl": "http://localhost:8000",
+      "privacyUrl": "https://yourstarverse.com/privacy",
+      "termsUrl": "https://yourstarverse.com/terms",
+      "deleteAccountUrl": "https://yourstarverse.com/delete-account"
     },
     "experiments": {
       "typedRoutes": false
