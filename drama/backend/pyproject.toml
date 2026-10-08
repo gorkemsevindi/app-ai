@@ -1,0 +1,23 @@
+[project]
+name = "dramaapp"
+version = "0.1.0"
+description = "AI short-drama platform: Creator Studio, viewer platform, monetization ledger"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115", "uvicorn[standard]", "sqlalchemy>=2.0", "psycopg[binary]", "alembic",
+  "pydantic-settings", "pyjwt", "bcrypt", "httpx", "python-multipart", "email-validator",
+  "numpy", "pillow",
+]
+[project.optional-dependencies]
+anthropic = ["anthropic>=1.0"]
+dev = ["pytest", "ruff"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["B008", "E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
