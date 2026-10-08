@@ -25,8 +25,26 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.types import TypeDecorator
 
 from .db import Base
+
+
+class UTCDateTime(TypeDecorator):
+    """Timezone-aware UTC datetimes on every backend (SQLite drops tzinfo on read)."""
+
+    impl = DateTime(timezone=True)
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        if value is not None and value.tzinfo is None:
+            value = value.replace(tzinfo=UTC)
+        return value
+
+    def process_result_value(self, value, dialect):
+        if value is not None and value.tzinfo is None:
+            value = value.replace(tzinfo=UTC)
+        return value
 
 
 def uid() -> str:
@@ -38,7 +56,7 @@ def now() -> datetime:
 
 
 class TS:
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=now)
 
 
 # ---------------------------------------------------------------------------------------- identity
@@ -51,7 +69,7 @@ class User(Base, TS):
     role: Mapped[str] = mapped_column(String(16), default="viewer")  # viewer|creator|admin
     locale: Mapped[str] = mapped_column(String(8), default="tr")
     birth_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
 
 
 class CreatorProfile(Base, TS):
@@ -83,9 +101,9 @@ class Series(Base, TS):
     pricing: Mapped[dict] = mapped_column(JSON, default=dict)  # per-series monetization override
     cover_asset_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     regions_blocked: Mapped[list] = mapped_column(JSON, default=list)
-    rights_expire_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    rights_expire_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     ai_disclosure: Mapped[dict] = mapped_column(JSON, default=dict)
-    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     seasons: Mapped[list["Season"]] = relationship(back_populates="series", order_by="Season.number")
 
 
@@ -120,7 +138,7 @@ class Episode(Base, TS):
     thumbnail_asset_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     qc_report: Mapped[dict] = mapped_column(JSON, default=dict)
     provenance: Mapped[dict] = mapped_column(JSON, default=dict)  # models, versions, rights, AI label
-    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     season: Mapped[Season] = relationship(back_populates="episodes")
 
 
@@ -177,8 +195,8 @@ class RightsGrant(Base, TS):
     evidence: Mapped[dict] = mapped_column(JSON, default=dict)  # consent text hash, asset ids, ip, ua
     review_status: Mapped[str] = mapped_column(String(16), default="pending")  # pending|approved|rejected
     reviewed_by: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
 
 
 # ---------------------------------------------------------------------------------------- assets / jobs
@@ -211,12 +229,12 @@ class GenerationJob(Base, TS):
     spent_credits: Mapped[int] = mapped_column(Integer, default=0)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     lease_owner: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
     output: Mapped[dict] = mapped_column(JSON, default=dict)
-    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     steps: Mapped[list["JobStep"]] = relationship(order_by="JobStep.seq", cascade="all, delete-orphan")
 
 
@@ -235,8 +253,8 @@ class JobStep(Base, TS):
     manifest: Mapped[dict] = mapped_column(JSON, default=dict)
     cost_credits: Mapped[int] = mapped_column(Integer, default=0)
     error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
 
 
 class ProviderCall(Base, TS):
@@ -339,7 +357,7 @@ class Entitlement(Base, TS):
     episode_id: Mapped[str] = mapped_column(ForeignKey("episodes.id"))
     purchase_id: Mapped[str | None] = mapped_column(ForeignKey("purchases.id"), nullable=True)
     source: Mapped[str] = mapped_column(String(16))  # purchase|subscription|grant
-    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
 
 
 class LedgerTransaction(Base, TS):
@@ -361,7 +379,7 @@ class LedgerEntry(Base, TS):
     account: Mapped[str] = mapped_column(String(120))
     currency: Mapped[str] = mapped_column(String(3))
     amount_minor: Mapped[int] = mapped_column(BigInteger)  # +debit/-credit convention: see ledger.py
-    available_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    available_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
 
 
 class RevenueAllocation(Base, TS):
@@ -377,7 +395,7 @@ class RevenueAllocation(Base, TS):
     platform_minor: Mapped[int] = mapped_column(Integer)
     currency: Mapped[str] = mapped_column(String(3))
     share_bps: Mapped[int] = mapped_column(Integer)
-    available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    available_at: Mapped[datetime] = mapped_column(UTCDateTime())
     reversed: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
@@ -390,7 +408,7 @@ class Payout(Base, TS):
     status: Mapped[str] = mapped_column(String(16), default="requested")  # requested|settled|rejected
     rail: Mapped[str] = mapped_column(String(24), default="sandbox")
     external_ref: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    settled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    settled_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
 
 
 class ProcessedEvent(Base, TS):
@@ -409,7 +427,7 @@ class OutboxEvent(Base, TS):
     type: Mapped[str] = mapped_column(String(48), index=True)
     payload: Mapped[dict] = mapped_column(JSON, default=dict)
     dedup_key: Mapped[str] = mapped_column(String(160), unique=True)
-    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    delivered_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
 
 
 class AuditEvent(Base, TS):

@@ -13,7 +13,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from ..providers.music_local import SR, write_wav
 from ..providers.tts_espeak import read_wav
-from .performer import background, render_bust
+from .performer import background, clear_caches, render_bust
 
 FPS = 24
 FONT_PATHS = ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf"]
@@ -209,6 +209,7 @@ def render_video(manifest: dict, spec: dict, out: Path, W: int, H: int, on_progr
     finally:
         proc.stdin.close()
         rc = proc.wait()
+        clear_caches()
     if rc != 0:
         raise RuntimeError("ffmpeg video encode failed")
     return {"frames": n_frames, "fps": FPS, "width": W, "height": H}

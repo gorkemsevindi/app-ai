@@ -443,6 +443,8 @@ def job_out(job: GenerationJob) -> dict:
 @router.post("/generations", status_code=202)
 def create_generation(body: GenerationIn, user: User = Depends(creator_user), db: Session = Depends(get_db)):
     ep = _own_episode(db, body.episode_id, user)
+    if ep.status in ("published", "in_review", "approved"):
+        raise AppError("episode.immutable", "Published or in-review episodes cannot be re-rendered", 409)
     active = db.scalar(select(GenerationJob).where(GenerationJob.episode_id == ep.id,
                                                    GenerationJob.status.in_(["queued", "running"])))
     if active:
@@ -517,3 +519,16 @@ def submit_episode(eid: str, user: User = Depends(creator_user), db: Session = D
         publish_episode(db, ep, actor_id=user.id)
     db.commit()
     return {"status": ep.status, "qc_failed": flags}
+
+
+@router.get("/episodes/{eid}/preview")
+def preview(eid: str, user: User = Depends(creator_user), db: Session = Depends(get_db)):
+    """Draft preview for the owner (before review/publish). Signed, short-lived URLs."""
+    from ..models import Asset
+    ep = _own_episode(db, eid, user)
+    hls = db.get(Asset, ep.hls_asset_id) if ep.hls_asset_id else None
+    return {"episode_id": ep.id, "status": ep.status, "qc": ep.qc_report, "provenance": ep.provenance,
+            "duration_s": ep.duration_s,
+            "hls_url": signed_url(f"{hls.storage_key}/master.m3u8", ttl_s=3600) if hls else None,
+            "mp4_url": _asset_url(db, ep.video_asset_id), "captions_url": _asset_url(db, ep.captions_asset_id),
+            "poster_url": _asset_url(db, ep.thumbnail_asset_id)}

@@ -187,7 +187,7 @@ def quantize_state(st: dict) -> tuple:
     )
 
 
-@lru_cache(maxsize=1024)
+@lru_cache(maxsize=192)
 def _scaled_layer(look_items: tuple, qst: tuple, h: int) -> Image.Image:
     """Draw at SS x resolution, downsample once (anti-aliasing) to the on-screen size."""
     look = dict(look_items)
@@ -197,12 +197,17 @@ def _scaled_layer(look_items: tuple, qst: tuple, h: int) -> Image.Image:
     return img.resize((int(LW * h / LH), h), Image.BILINEAR, reducing_gap=2.0)
 
 
-@lru_cache(maxsize=2048)
+@lru_cache(maxsize=384)
 def _posed_layer(look_items: tuple, qst: tuple, h: int, tilt: float) -> Image.Image:
     img = _scaled_layer(look_items, qst, h)
     if abs(tilt) > 0.01:  # head/body tilt pivots at the neck; rotating the small layer keeps this cheap
         img = img.rotate(tilt, resample=Image.BICUBIC, center=(img.width / 2, img.height * 330 / LH))
     return img
+
+
+def clear_caches() -> None:
+    _scaled_layer.cache_clear()
+    _posed_layer.cache_clear()
 
 
 def render_bust(look: dict, st: dict, height_px: int) -> Image.Image:

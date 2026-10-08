@@ -286,8 +286,7 @@ def generate(inp: WizardInput) -> StoryBible:
         a = cast[0].name
         episodes.append(EpisodeScript(
             number=i + 1, title=f"{beat_title}{cycle}",
-            synopsis=(f"{a}, {obj} yüzünden ailesinin sırrına bir adım daha yaklaşıyor." if lang == "tr"
-                      else f"{a} gets one step closer to the family secret because of {obj}."),
+            synopsis=(f"{beat_title}: {a} — “{scenes[0].lines[0].text}”"),
             cliffhanger=scenes[-1].lines[-1].text, scenes=scenes))
 
     title = inp.title or TITLES[lang][inp.genre]

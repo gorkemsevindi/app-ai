@@ -1,0 +1,32 @@
+# Local stack: `docker compose up --build`, then `docker compose run --rm api python -m dramaapp.seed`.
+# Shared volume stands in for S3/R2 locally. Demo credentials are created by the seed only.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment: {POSTGRES_USER: drama, POSTGRES_PASSWORD: drama, POSTGRES_DB: drama}
+    ports: ["5432:5432"]
+    volumes: [pg:/var/lib/postgresql/data]
+    healthcheck: {test: ["CMD-SHELL", "pg_isready -U drama"], interval: 5s, retries: 10}
+  api:
+    build: {context: ., dockerfile: infra/api.Dockerfile}
+    environment: &env
+      DRAMA_ENV: dev
+      DRAMA_DATABASE_URL: postgresql+psycopg://drama:drama@postgres:5432/drama
+      DRAMA_INLINE_WORKER: "0"
+      DRAMA_JWT_SECRET: ${DRAMA_JWT_SECRET:-dev-only-change-me-0123456789abcdef0123456789}
+      DRAMA_MEDIA_SIGNING_SECRET: ${DRAMA_MEDIA_SIGNING_SECRET:-dev-only-media-secret-change-me}
+      DRAMA_LLM_PROVIDER: ${DRAMA_LLM_PROVIDER:-local_template}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    ports: ["8000:8000"]
+    volumes: [media:/data]
+    depends_on: {postgres: {condition: service_healthy}}
+  worker:
+    build: {context: ., dockerfile: infra/worker.Dockerfile}
+    environment: *env
+    volumes: [media:/data]
+    depends_on: [api]
+  web:
+    build: {context: ., dockerfile: infra/web.Dockerfile, args: {NEXT_PUBLIC_API_URL: "http://localhost:8000"}}
+    ports: ["3000:3000"]
+    depends_on: [api]
+volumes: {pg: {}, media: {}}

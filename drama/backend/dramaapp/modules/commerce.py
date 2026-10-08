@@ -74,8 +74,8 @@ def ordered_episodes(db: Session, series_id: str, published_only: bool = True) -
 
 def episode_index(db: Session, ep: Episode) -> int:
     """1-based position in the series' published order (drives the 'first N free' rule)."""
-    eps = ordered_episodes(db, ep.series_id, published_only=False)
-    return next(i for i, e in enumerate(eps, 1) if e.id == ep.id)
+    eps = ordered_episodes(db, ep.series_id, published_only=ep.status == "published")
+    return next((i for i, e in enumerate(eps, 1) if e.id == ep.id), len(eps) + 1)
 
 
 def has_access(db: Session, user: User | None, ep: Episode) -> tuple[bool, str]:

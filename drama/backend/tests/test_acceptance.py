@@ -250,3 +250,18 @@ def test_publish_gate_and_takedown(client, db):
     assert q[0]["priority"] <= 5
     client.post(f"/admin/moderation/{rep['case_id']}", headers=ah, json={"action": "takedown"})
     assert client.get(f"/episodes/{eid}/playback").status_code == 404
+
+
+def test_feed_tabs_and_search(client, db):
+    info = seed(fixture=True, episodes=6)
+    vh, _ = signup(client)
+    for tab in ("for_you", "trending", "following", "new"):
+        r = client.get(f"/feed?tab={tab}", headers=vh)
+        assert r.status_code == 200, r.text
+    items = client.get("/feed").json()["items"]
+    assert any(i["id"] == info["series_id"] for i in items)
+    assert all("rank_score" in i for i in items)
+    client.post(f"/series/{info['series_id']}/follow?on=true", headers=vh)
+    assert [i["id"] for i in client.get("/feed?tab=following", headers=vh).json()["items"]] == [info["series_id"]]
+    title = next(i["title"] for i in items if i["id"] == info["series_id"])
+    assert client.get(f"/feed?q={title[:4]}").json()["items"]
