@@ -84,6 +84,9 @@ class Settings(BaseSettings):
     gemini_api_key: str | None = Field(default=None, validation_alias=AliasChoices("GEMINI_API_KEY",
                                                                                    "APP_GEMINI_API_KEY"))
 
+    # Scheduler: shared secret for POST /internal/cron/{task} (from the secrets manager)
+    cron_token: str | None = None
+
     cors_origins: list[str] = []
     terms_version: str = "2026-10-01"
 

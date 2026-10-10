@@ -52,8 +52,10 @@ def verify_purchase(body: PurchaseVerifyIn, request: Request, user: User = Depen
     if txn.provider == "google" and out["status"] in ("granted", "active", "grace"):
         try:  # after commit: never consume/acknowledge something we did not durably grant
             v.finalize(txn)
-        except Exception:  # noqa: BLE001 - Play retries; RTDN + next verify re-attempt
+        except Exception:  # noqa: BLE001 - retried by the `play_finalize_retry` scheduled task
             log.warning("play finalize failed for %s", txn.transaction_id, exc_info=True)
+            billing.mark_finalize_pending(db, txn)
+            db.commit()
     return {**out, "transaction_id": txn.transaction_id, "balance": credits.available(db, user.id)}
 
 
@@ -111,11 +113,7 @@ def replay(event_id: uuid.UUID, request: Request, admin: User = Depends(admin_us
     ev = db.get(WebhookEvent, event_id)
     if ev is None:
         raise not_found("event")
-    if ev.provider == "apple":
-        meta, txn, renewal = billing.verifier("ios").notification(ev.payload["signedPayload"])
-        billing.process_apple(db, ev, meta, txn, renewal)
-    else:
-        billing.process_google(db, ev, ev.payload, billing.verifier("android"))
+    billing.replay_event(db, ev)
     audit(db, admin.id, "billing.webhook_replay", "webhook_event", str(ev.id), {"status": ev.status},
           ip=client_ip(request))
     db.commit()

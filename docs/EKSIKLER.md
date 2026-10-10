@@ -4,7 +4,7 @@
 
 **Kullanım:** Her aşamada güncellenir. İstendiğinde bu dosya verilir.
 
-**Son güncelleme:** 2026-10-10 (Aşama D sonrası).
+**Son güncelleme:** 2026-10-10 (Aşama E sonrası).
 
 **Etiketler:**
 - **[SEN]** Senin işin: anahtar, hesap, sözleşme veya ticari karar.
@@ -81,7 +81,7 @@
 
 ### Admin ve operasyon
 - Admin paneli arayüzü yok; sadece admin API'si var.
-- Zamanlanmış işler (cron) yok:
+- Zamanlanmış işler ✅ Aşama E'de yazıldı (`app/scheduler.py`). Yalnızca canlı ortamda tetikleyici kurulumu kaldı:
   - şablon metriklerini yenileme;
   - süresi dolmuş kredileri toplu temizleme (şu an kullanıcının bir sonraki kredi işleminde temizleniyor);
   - saklama süresi dolan dosyaları silme;
@@ -144,11 +144,22 @@
 
 ## 5. Sırada bekleyen iş planı
 
-### 5.1 V4 Aşama E (sıradaki adım)
-- Sağlayıcı benchmark düzeneği (rıza alınmış test klipleriyle kalite, maliyet, gecikme ve hata oranı ölçümü).
-- Model yönlendirme tablosu ve kendi GPU'muzda çalıştırma adaptörleri.
-- Zamanlanmış görevler: metrikler, ödeme dönemi kapanışları, süresi dolan krediler, saklama süresi dolan dosyalar.
-- Yük testi, yedekten geri dönüş ve uluslararasılaştırma (çoklu dil ve ülke desteği).
+### 5.1 V4 Aşama E: tamamlandı, kalan eksikler
+
+**Ortam ve bayraklar**
+- Zamanlanmış görevler dışarıdan tetiklenmeli. Cron veya Kubernetes CronJob kurulumu ve `APP_CRON_TOKEN` gizli değişkeni gerekiyor. [SEN]
+- Uyarlanabilir yönlendirme `routing` bayrağıyla açılır. Önce gerçek sağlayıcı fiyatları girilmeli ve benchmark çalıştırılmalı. [SEN]
+
+**Kalite ve performans ölçümü**
+- Benchmark kalite puanı şu an sadece insan değerlendirmesine dayanıyor; otomatik kalite metriği yok (V5'te gelecek).
+- Yük testi tek makinede ve boş veritabanıyla yapıldı (yaklaşık 220 istek/sn, hata yok). Canlı ortam kapasitesi ölçülmedi.
+
+**Altyapı**
+- Altyapı-kod (Terraform), çoklu bölge yedeklemesi ve otomatik ölçekleme (autoscaling) yok.
+- Kendi GPU'muzda çalıştırma adaptörleri hâlâ doğrulanmadı; GPU erişimi gerekiyor. [DOĞRULAMA]
+
+**Diller**
+- Sadece Türkçe ve İngilizce var. Yeni diller için çeviri gerekiyor; sağdan sola yazılan diller (RTL) test edilmedi.
 
 ### 5.2 Master Spec V5: kendi kendine öğrenen motor
 Dosya: `docs/MASTER_SPEC_V5_SELF_LEARNING.docx`. Kullanıcı 2026-10-10'da ekledi; V4 tamamlanınca ele alınacak.

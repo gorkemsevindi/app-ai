@@ -760,6 +760,75 @@ class LicenseUsageEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+# ---------------------------------------------------------------- evaluation + operations (V4 Stage E)
+
+class BenchmarkSet(Base):
+    """A fixed, rights-cleared evaluation set. Frozen on first run so results stay comparable over time."""
+
+    __tablename__ = "benchmark_sets"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(80))
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    frozen: Mapped[bool] = mapped_column(Boolean, default=False)
+    rights_note: Mapped[str] = mapped_column(String(300))
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (UniqueConstraint("name", "version", name="uq_benchmark_set_version"),)
+
+
+class BenchmarkCase(Base):
+    __tablename__ = "benchmark_cases"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    set_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("benchmark_sets.id", ondelete="CASCADE"), index=True)
+    key: Mapped[str] = mapped_column(String(40))
+    category: Mapped[str] = mapped_column(String(40))  # dance|comedy|dialogue|music|ads|history|multi_person|...
+    prompt: Mapped[str] = mapped_column(String(1500))
+    duration_s: Mapped[int] = mapped_column(Integer)
+    aspect_ratio: Mapped[str] = mapped_column(String(8), default="9:16")
+
+    __table_args__ = (UniqueConstraint("set_id", "key", name="uq_benchmark_case_key"),)
+
+
+class BenchmarkRun(Base):
+    __tablename__ = "benchmark_runs"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    set_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("benchmark_sets.id", ondelete="RESTRICT"), index=True)
+    providers: Mapped[list[str]] = mapped_column(JSONB)
+    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class BenchmarkResult(Base):
+    """One provider x case render. Human review is blind (reviewers never see the provider)."""
+
+    __tablename__ = "benchmark_results"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    run_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("benchmark_runs.id", ondelete="CASCADE"), index=True)
+    case_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("benchmark_cases.id", ondelete="CASCADE"))
+    provider: Mapped[str] = mapped_column(String(60))
+    job_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    adherence: Mapped[int | None] = mapped_column(Integer)  # 1..5 instruction adherence
+    quality: Mapped[int | None] = mapped_column(Integer)    # 1..5 visual quality
+    reviewer_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    notes: Mapped[str | None] = mapped_column(String(300))
+
+    __table_args__ = (UniqueConstraint("run_id", "case_id", "provider", name="uq_benchmark_result"),)
+
+
+class ScheduledRun(Base):
+    __tablename__ = "scheduled_runs"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    task: Mapped[str] = mapped_column(String(40), index=True)
+    status: Mapped[str] = mapped_column(String(16))  # running|succeeded|failed|skipped
+    result: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    error: Mapped[str | None] = mapped_column(String(500))
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class ShareLink(Base):
     """Server-issued share link ("Try this template"). The public token is `code.signature`; only `code`
     is stored. Links point at a template, never at a user's private output video."""

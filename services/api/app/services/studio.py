@@ -517,12 +517,26 @@ def estimate(db: Session, user: User, project: StudioProject, v: StudioProjectVe
     return {**out, "version_id": str(v.id), "version": v.version, "director": v.director}
 
 
+def route_for(db: Session, sb: Storyboard) -> dict:
+    """Provider for this storyboard: one provider per render keeps the look consistent across shots."""
+    from . import router
+
+    needed: set[str] = set()
+    for s in sb.shots():
+        needed |= needed_capabilities(_shot_inputs(db, sb, s, ""))
+    return router.choose(db, needed, sb.quality)
+
+
 def estimate_storyboard(db: Session, user: User, project: StudioProject, storyboard: dict) -> dict:
     cfg = require_enabled(db)
     sb = Storyboard.model_validate(storyboard)
-    provider = cfg["shot_provider"]
-    caps = set(cfg["provider_capabilities"].get(provider, []))
-    usd_ps = cfg["provider_usd_per_second"].get(provider)
+    route = route_for(db, sb)
+    provider = route["provider"]
+    from . import router
+
+    info = router.registry(db).get(provider or "", {})
+    caps = set(info.get("capabilities", []))
+    usd_ps = info.get("usd_per_second")
     cps = float(cfg["credits_per_second"][sb.quality])
     renders = {r.content_hash: r for r in db.execute(select(StudioShotRender).where(
         StudioShotRender.project_id == project.id)).scalars()}
@@ -559,7 +573,10 @@ def estimate_storyboard(db: Session, user: User, project: StudioProject, storybo
         limitations.append("Speech synthesis is not enabled yet: dialogue is shown as captions.")
     if missing:
         limitations.append(f"The current video provider does not support: {', '.join(sorted(missing))}.")
-    return {"provider": provider, "shots": rows,
+    if provider is None:
+        limitations.append("No video provider currently meets the quality, health and capability requirements.")
+    return {"provider": provider, "fallback_provider": route["fallback"], "routing": route["reason"],
+            "shots": rows,
             "new_shots": sum(1 for r in rows if r["status"] == "new"),
             "reused_shots": sum(1 for r in rows if r["status"] != "new"),
             "credits": total, "assemble_credits": assemble,
@@ -594,6 +611,8 @@ def render(db: Session, user: User, project: StudioProject, version_id: uuid.UUI
     if est["missing_sources"]:
         raise ApiError(409, "source_not_rendered", "trimmed or extended shots need their source shot rendered first",
                        {"shots": est["missing_sources"]})
+    if est["provider"] is None:
+        raise ApiError(503, "no_eligible_provider", "no video provider is available for this storyboard right now")
     if est["missing_capabilities"]:
         raise ApiError(422, "capability_unsupported", "the video provider can't do what this storyboard needs",
                        {"missing": est["missing_capabilities"]})
@@ -609,7 +628,7 @@ def render(db: Session, user: User, project: StudioProject, version_id: uuid.UUI
         raise ApiError(409, "confirmation_required", "confirm the price before rendering", {"credits": est["credits"]})
 
     sb = Storyboard.model_validate(v.storyboard)
-    provider = cfg["shot_provider"]
+    provider, fallback = est["provider"], est["fallback_provider"]
     s = get_settings()
     qc = "paid_high" if user.plan == "pro" else "free"
     by_key = {r["key"]: r for r in est["shots"]}
@@ -633,7 +652,7 @@ def render(db: Session, user: User, project: StudioProject, version_id: uuid.UUI
             spec["extend"] = {"direction": shot.derive.direction, "source_video_key": src.video_key}
         job = GenerationJob(
             id=uuid.uuid4(), user_id=user.id, kind=JobKind.studio_shot, status=JobStatus.queued, queue_class=qc,
-            studio_project_id=project.id, preferred_model=provider, fallback_model=cfg.get("fallback_provider"),
+            studio_project_id=project.id, preferred_model=provider, fallback_model=fallback,
             idempotency_key=key, credit_cost=row["credits"], max_attempts=s.job_max_attempts,
             watermark=False, est_cost_usd=row["est_cost_usd"], spec=spec)
         db.add(job)

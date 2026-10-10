@@ -563,3 +563,104 @@ Stage E:
 - load tests;
 - backup and restore;
 - internationalization.
+
+## Stage E: provider routing, benchmarks, scheduled operations, load/backup drills
+
+Feature flags:
+- `routing` (off = the configured provider, exactly as before);
+- `retention` and `creator_marketplace.auto_settle` (config only).
+
+Migration: `0010_benchmarks_and_scheduler` (additive, reversible).
+
+### Model registry and adaptive router
+
+**Registry (`services/router.py`)**
+- Merges the Studio provider config with `routing.providers` overrides.
+- Each provider has capabilities, a verified USD price per second, and a quality score. The score comes from **blind benchmark reviews** when they exist, otherwise from config.
+
+**Eligibility.** A provider is excluded when any of these holds:
+- its kill switch is on (`model_disabled:*`);
+- a needed capability is missing;
+- it has no price;
+- it is **unhealthy**: its recent failure rate (from `model_runs`, over a window, once there are enough runs) is above the limit. This suspends it automatically (spec V4 §12);
+- its measured quality is below the floor.
+
+**Choice**
+- Standard tier: the cheapest eligible provider; the next one is the fallback.
+- Premium tier: the highest quality.
+- One provider is used per render, so shots look consistent.
+- If nothing is eligible, the Studio estimate says so and render returns 503 `no_eligible_provider`.
+
+**Admin:** `GET /admin/models` (registry, health, kill switches), `GET /admin/routing/preview`.
+
+### Benchmark harness (`services/benchmarks.py`)
+
+- **Sets** are versioned evaluation sets with categories (dance, comedy, dialogue, ...) and a rights note. A set is frozen on its first run.
+- **Runs** render every case on every chosen provider as normal studio shot jobs owned by the admin, charged **0 credits**, with full telemetry.
+- **Report** per provider and per category:
+  - success rate;
+  - p50 and p95 latency;
+  - cost and cost per success;
+  - QA samples;
+  - review score.
+  
+  Cases a provider hasn't processed are shown as pending; no result is invented.
+- **Blind human review:** the queue shows the prompt and the video, never the provider, in a provider-neutral order. Each result can be reviewed once (adherence and quality, 1–5).
+- **Feedback into routing:** the mean blind score becomes the router's quality value.
+
+### Scheduled operations (`app/scheduler.py`)
+
+**Tasks**
+- `template_metrics`
+- `credit_expiry`: sweeps users who never came back.
+- `settlements`: only when `auto_settle` is on and a policy exists.
+- `retention`: storage purge for deleted studio projects after a grace period, and an optional output retention period.
+- `play_finalize_retry`: Play acknowledge/consume failures are now marked and retried.
+- `webhook_retry`: failed store notifications, with an attempt limit.
+
+**Safety**
+- Each task runs in its own transaction under a PostgreSQL advisory lock, so a second scheduler skips it instead of running it twice.
+- Every run is logged in `scheduled_runs` (status, result, error).
+
+**How to run**
+- CLI: `python -m app.scheduler all|<task>`
+- Endpoint: `POST /internal/cron/{task}` with `X-Cron-Token` (`APP_CRON_TOKEN`; without it the endpoint returns 503).
+- Run log: `GET /admin/scheduler/runs`
+
+### Load test, backup drill, internationalization
+
+**Load test: `infra/scripts/loadtest.py`** (async: feed, templates, config, credits, generations, health)
+- Local run: 2 uvicorn workers on the same machine as the client, 50 concurrent virtual users, 2000 requests.
+- Result: **0 errors, ~220 requests/s, p50 147 ms, p95 634 ms, p99 890 ms.**
+- This is a regression baseline, not a production capacity figure. The client and server shared one machine and the database was empty, so most of the latency is local contention. Production capacity must be measured on the deployed topology.
+
+**Backup and restore: `infra/scripts/backup_restore_check.sh`**
+1. `pg_dump` the database.
+2. Restore it into a scratch database.
+3. Check identical row counts in all 51 tables, the presence of the append-only triggers (9), and that the credit ledger reconciles.
+4. Drop the scratch database.
+
+It ran here with **BACKUP/RESTORE OK**.
+
+**Internationalization**
+- Mobile test that every locale has exactly the English keys and the same `{{placeholders}}`. TR and EN match.
+
+### Tests
+
+- **API: 98/98 passed** (3 new in `test_ops.py`):
+  - static → adaptive routing: price, kill switch, capability, premium tier, automatic suspension on failure rate, quality floor, estimate and render with no eligible provider;
+  - **real worker benchmark run** with blind review feeding the router's quality value; no user credit is touched;
+  - scheduler tasks, advisory-lock skip, cron authentication, CLI, run log.
+- **Mobile:** node tests 6/6 (locale parity is new); `tsc` passes.
+- **Worker:** 20/20.
+
+### Known limitations
+
+- Running on our own GPUs is still the existing worker adapters (DreamID-V, Wan2.2, LatentSync/MuseTalk). They are gated and not validated on a GPU.
+- Benchmark quality depends on human reviews; there is no automatic quality metric yet (identity drift and flicker scores come in V5).
+- No real infrastructure-as-code (Terraform) or multi-region failover. The scheduler needs an external trigger (cron / Kubernetes CronJob).
+- Only two languages exist (TR, EN). Adding more needs translators; RTL layout is untested.
+
+### Next step
+
+Master Spec V5 (self-learning engine), its phase A: audit and gap report against V5 before writing any code.

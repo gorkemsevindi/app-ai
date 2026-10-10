@@ -475,3 +475,56 @@ def decode_pubsub(body: dict) -> tuple[str, dict]:
     msg = body.get("message") or {}
     data = json.loads(base64.b64decode(msg.get("data") or b"e30=").decode() or "{}")
     return str(msg.get("messageId") or msg.get("message_id") or ""), data
+
+
+# ---------------------------------------------------------------- retries (scheduled tasks)
+
+def replay_event(db: Session, ev: WebhookEvent) -> None:
+    if ev.provider == "apple":
+        meta, txn, renewal = verifier("ios").notification(ev.payload["signedPayload"])
+        process_apple(db, ev, meta, txn, renewal)
+    else:
+        process_google(db, ev, ev.payload, verifier("android"))
+
+
+def mark_finalize_pending(db: Session, txn: StoreTxn) -> None:
+    pur = db.execute(select(Purchase).where(Purchase.provider == txn.provider,
+                                            Purchase.transaction_id == txn.transaction_id)).scalar_one_or_none()
+    if pur is not None:
+        pur.raw = {**(pur.raw or {}), "finalize_pending": True, "product_id": txn.product_id,
+                   "store_kind": txn.store_kind, "original_id": txn.original_id,
+                   "acknowledged": txn.acknowledged}
+
+
+def retry_finalize(db: Session, limit: int = 100) -> dict:
+    """Play refunds purchases that are never acknowledged (3 days): retry until it succeeds."""
+    rows = db.execute(select(Purchase).where(Purchase.provider == "google",
+                                             Purchase.raw["finalize_pending"].as_boolean().is_(True))
+                      .limit(limit)).scalars().all()
+    ok = failed = 0
+    for pur in rows:
+        txn = StoreTxn(provider="google", transaction_id=pur.transaction_id, original_id=pur.raw["original_id"],
+                       product_id=pur.raw["product_id"], store_kind=pur.raw["store_kind"],
+                       environment=pur.environment, state="purchased",
+                       acknowledged=bool(pur.raw.get("acknowledged", False)))
+        try:
+            verifier("android").finalize(txn)
+            pur.raw = {**pur.raw, "finalize_pending": False}
+            ok += 1
+        except Exception:  # noqa: BLE001 - keep pending, try next run
+            failed += 1
+    return {"finalized": ok, "still_pending": failed}
+
+
+def retry_failed_events(db: Session, max_attempts: int = 5, limit: int = 100) -> dict:
+    rows = db.execute(select(WebhookEvent).where(WebhookEvent.status == "failed",
+                                                 WebhookEvent.attempts < max_attempts)
+                      .order_by(WebhookEvent.received_at).limit(limit)).scalars().all()
+    done = 0
+    for ev in rows:
+        try:
+            replay_event(db, ev)
+        except ApiError as e:
+            _finish(ev, "failed", e.code)
+        done += ev.status == "processed"
+    return {"retried": len(rows), "processed": done}
