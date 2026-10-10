@@ -259,7 +259,7 @@ This phase includes **no training code**. Its job is to ensure that no self-host
 
 ## V5 final state
 - Phases **A–E complete.**
-- **API: full suite green.**
+- **API: 115/115 passed.**
 - **Worker:** 20/20.
 - **Mobile:** `tsc` clean.
 - `alembic check` shows no drift (through 0014).
