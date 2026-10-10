@@ -183,7 +183,8 @@ def enforce_economics(db: Session, total_credits: int, est_cost_usd: float) -> N
 def create_audio(db: Session, user: User, mime: str, size_bytes: int, rights_basis: str, attested: bool
                  ) -> AudioAsset:
     enabled, cfg = config(db)
-    if not enabled:
+    studio_flag = db.get(FeatureFlag, "studio")
+    if not enabled and not (studio_flag and studio_flag.enabled):  # lip-sync soundtracks or AI Studio music
         raise ApiError(403, "feature_disabled", "custom audio is not available yet")
     if not attested or rights_basis not in ("own", "licensed"):
         raise ApiError(422, "attestation_required", "confirm you own or licensed this audio")

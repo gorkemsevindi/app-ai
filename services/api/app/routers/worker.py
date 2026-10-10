@@ -12,6 +12,7 @@ from ..db import get_db
 from ..deps import worker_auth
 from ..models import JobStatus
 from ..services import generation as gen
+from ..services import studio
 
 router = APIRouter(prefix="/internal/worker", tags=["internal"], dependencies=[Depends(worker_auth)])
 
@@ -54,7 +55,13 @@ def claim(body: ClaimIn, response: Response, db: Session = Depends(get_db)):
         db.commit()  # persist reaped leases
         response.status_code = 204
         return None
-    payload = gen.build_worker_payload(db, job)
+    try:
+        payload = gen.build_worker_payload(db, job)
+    except studio.DispatchRefused as e:
+        gen.refuse_dispatch(db, job, e.code, "this job is no longer authorized")
+        db.commit()
+        response.status_code = 204
+        return None
     db.commit()
     return payload
 

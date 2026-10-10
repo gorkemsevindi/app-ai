@@ -254,6 +254,8 @@ class JobKind(str, enum.Enum):
     template = "template"            # identity profile x template (classic flow)
     analysis = "analysis"            # multi-person: detect + track people in an uploaded video (no credits)
     multi_replace = "multi_replace"  # multi-person: replace assigned people in an uploaded video
+    studio_shot = "studio_shot"      # AI Studio: render one storyboard shot
+    studio_assemble = "studio_assemble"  # AI Studio: assemble rendered shots + captions + audio
 
 
 class GenerationJob(TimestampMixin, Base):
@@ -276,6 +278,7 @@ class GenerationJob(TimestampMixin, Base):
     idempotency_key: Mapped[str] = mapped_column(String(80))
     credit_cost: Mapped[int] = mapped_column(Integer)
     refunded: Mapped[bool] = mapped_column(Boolean, default=False)
+    studio_project_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), index=True)
     billing_state: Mapped[str | None] = mapped_column(String(12))  # reserved|settled|released (NULL: free/legacy)
     est_cost_usd: Mapped[float | None] = mapped_column(Float)
     progress: Mapped[float] = mapped_column(Float, default=0.0)
@@ -512,6 +515,92 @@ class CreditAllocation(Base):
     amount: Mapped[int] = mapped_column(Integer)
 
     __table_args__ = (CheckConstraint("amount <> 0", name="ck_credit_allocations_nonzero"),)
+
+
+# ---------------------------------------------------------------- AI Studio (V4 Stage B)
+
+class StudioProject(TimestampMixin, Base):
+    __tablename__ = "studio_projects"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    title: Mapped[str] = mapped_column(String(120))
+    aspect_ratio: Mapped[str] = mapped_column(String(8), default="9:16")
+    language: Mapped[str] = mapped_column(String(8), default="en")
+    status: Mapped[str] = mapped_column(String(20), default="draft")  # draft|planned|rendering|ready|failed
+    current_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    rendered_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    output_job_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    budget_credits: Mapped[int | None] = mapped_column(Integer)  # per-project cost cap chosen by the user
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class StudioProjectVersion(Base):
+    """Immutable snapshot of the storyboard (scenes, shots, dialogue, captions, audio). Edits and restores
+    create new versions; nothing is overwritten."""
+
+    __tablename__ = "studio_project_versions"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    project_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("studio_projects.id", ondelete="CASCADE"), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    parent_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    source: Mapped[str] = mapped_column(String(20))  # director|edit|restore
+    brief: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    storyboard: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    director: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)  # provider, model, label
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (UniqueConstraint("project_id", "version", name="uq_studio_version"),)
+
+
+class StudioShotRender(Base):
+    """A rendered (or rendering) shot, keyed by the hash of everything that affects its pixels. Versions whose
+    shot has the same hash reuse it: editing one shot never re-renders (or re-charges) the others."""
+
+    __tablename__ = "studio_shot_renders"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    project_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("studio_projects.id", ondelete="CASCADE"), index=True)
+    content_hash: Mapped[str] = mapped_column(String(64))
+    shot_key: Mapped[str] = mapped_column(String(40))
+    status: Mapped[str] = mapped_column(String(20), default="queued")  # queued|ready|failed
+    job_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("generation_jobs.id", ondelete="SET NULL"))
+    video_key: Mapped[str | None] = mapped_column(String(512))
+    duration_ms: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (UniqueConstraint("project_id", "content_hash", name="uq_studio_shot_hash"),)
+
+
+class StudioCharacter(TimestampMixin, Base):
+    """Project-scoped (or reusable) character. A real likeness is only usable through the owner's own consented
+    identity profile plus an active consent receipt; fictional characters have no reference images."""
+
+    __tablename__ = "studio_characters"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    project_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("studio_projects.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(60))
+    description: Mapped[str] = mapped_column(String(500), default="")
+    traits: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)  # wardrobe/costume presets etc.
+    identity_profile_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("identity_profiles.id", ondelete="SET NULL"))
+    voice_permission: Mapped[str] = mapped_column(String(20), default="none")  # none|tts_stock (no cloning)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ConsentReceipt(Base):
+    """Evidence that a person allowed a use of their likeness/voice. Revocation stops future use."""
+
+    __tablename__ = "consent_receipts"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    subject_type: Mapped[str] = mapped_column(String(30))  # studio_character
+    subject_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    scope: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)  # {"likeness": true, "voice": false}
+    terms_version: Mapped[str] = mapped_column(String(32))
+    statement: Mapped[str] = mapped_column(String(300))
+    granted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class ShareLink(Base):

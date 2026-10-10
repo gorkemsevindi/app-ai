@@ -224,6 +224,19 @@ def _on_terminal_failure(db: Session, job: GenerationJob) -> None:
         from . import multiperson
 
         multiperson.mark_analysis_failed(db, job)
+    if job.studio_project_id is not None:
+        from . import studio
+
+        studio.on_job_failed(db, job)
+
+
+def refuse_dispatch(db: Session, job: GenerationJob, code: str, message: str) -> None:
+    """A claimed job whose authorization no longer holds (e.g. consent revoked): fail final + release credits."""
+    _close_run(db, job, "failed", {}, error=code)
+    job.error_code, job.error_message = code, message
+    transition(job, JobStatus.failed)
+    _refund(db, job, code)
+    _on_terminal_failure(db, job)
 
 
 def _requeue_or_fail(db: Session, job: GenerationJob, code: str, message: str) -> None:
@@ -360,6 +373,10 @@ def complete(db: Session, job_id: uuid.UUID, worker_id: str, attempt: int, outpu
     job.error_code = job.error_message = None
     transition(job, JobStatus.completed)
     credits.settle(db, job)
+    if job.studio_project_id is not None:
+        from . import studio
+
+        studio.on_job_completed(db, job, video_key, int(output.get("duration_ms", 5000)))
     return job
 
 
@@ -409,6 +426,10 @@ def compile_prompt(ver: TemplateVersion, user_text: str | None) -> str:
 
 
 def build_worker_payload(db: Session, job: GenerationJob) -> dict:
+    if job.kind in (JobKind.studio_shot, JobKind.studio_assemble):
+        from . import studio
+
+        return studio.build_payload(db, job)
     if job.kind != JobKind.template:
         from . import multiperson
 

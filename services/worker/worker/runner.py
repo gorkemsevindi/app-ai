@@ -74,6 +74,9 @@ def process(api: ApiClient, adapters: dict, payload: dict, workdir: Path) -> Non
         if payload.get("kind") in ("analysis", "multi_replace"):
             _process_multiperson(api, adapter, payload, workdir, hb, metrics, t0)
             return
+        if payload.get("kind") in ("studio_shot", "studio_assemble"):
+            _process_studio(api, adapter, payload, workdir, hb, metrics, t0)
+            return
         refs = []
         for i, a in enumerate(payload["identity_assets"]):
             if a["kind"] == "photo":
@@ -169,6 +172,44 @@ def _process_multiperson(api: ApiClient, adapter, payload: dict, workdir: Path, 
     hb.stop()
     api.complete(job_id, attempt, {"width": enc.width, "height": enc.height, "duration_ms": enc.duration_ms,
                                    "codec": "h264", "qa": qa}, report, metrics)
+
+
+def _process_studio(api: ApiClient, adapter, payload: dict, workdir: Path, hb: Heartbeat, metrics: dict,
+                    t0: float) -> None:
+    from .studio.assemble import assemble
+
+    job_id, attempt, spec = payload["job_id"], payload["attempt"], payload["spec"]
+    w, h = (int(x) for x in spec["resolution"].split("x"))
+    hb.update(0.05, "generating")
+    if payload["kind"] == "studio_shot":
+        refs = {k: [download(u, workdir / f"ref_{k}_{i}.img") for i, u in enumerate(urls)]
+                for k, urls in (payload.get("reference_images") or {}).items()}
+        raw, info = adapter.render(spec, refs, workdir, hb.update, hb.cancel)
+        if hb.lost.is_set():
+            return
+        hb.update(0.9, "postprocessing")
+        # shots are intermediates: no watermark here, it is applied once on the assembled film
+        enc = encode_vertical(raw, workdir, width=w, height=h, watermark=False, job_id=job_id, audio=raw)
+        captions = None
+    else:
+        shots = [(download(s["url"], workdir / f"shot_{i:02d}.mp4"), s) for i, s in enumerate(payload["shots"])]
+        music = download(payload["music_url"], workdir / "music.bin") if payload.get("music_url") else None
+        hb.update(0.3, "postprocessing")
+        film, captions = assemble(shots, spec, workdir, music)
+        info = {"shots": len(shots), "music": music is not None, "captions": bool(captions)}
+        (workdir / "enc").mkdir()
+        enc = encode_vertical(film, workdir / "enc", width=w, height=h, watermark=payload.get("watermark", True),
+                              job_id=job_id, audio=film)
+    report = moderation_report(enc.video)
+    upload(payload["upload"]["video"]["url"], enc.video, "video/mp4")
+    upload(payload["upload"]["thumbnail"]["url"], enc.thumbnail, "image/jpeg")
+    if captions is not None and payload["upload"].get("captions"):
+        upload(payload["upload"]["captions"]["url"], captions, "text/vtt")
+    elapsed = time.time() - t0
+    metrics.update(gpu_seconds=elapsed, est_cost_usd=round(elapsed / 3600 * GPU_PRICE_PER_HOUR, 5), **info)
+    hb.stop()
+    api.complete(job_id, attempt, {"width": enc.width, "height": enc.height, "duration_ms": enc.duration_ms,
+                                   "codec": "h264"}, report, metrics)
 
 
 def _safe_fail(api, job_id, attempt, code, msg, retryable, metrics) -> None:

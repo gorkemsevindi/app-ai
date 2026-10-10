@@ -8,6 +8,16 @@ import os
 from .adapters import command
 from .adapters.mock import MockAdapter
 from .multiperson import adapters as mp
+from .studio.shots import MockT2V, VeoShot
+
+
+class StudioAssembler:
+    """CPU-only assembly of AI Studio projects (ffmpeg)."""
+
+    name = "studio_assembler"
+
+    def healthcheck(self) -> dict:
+        return {"ok": True, "gpu": False}
 
 FACTORIES = {
     "mock": MockAdapter,
@@ -20,6 +30,10 @@ FACTORIES = {
     "wan22_animate_mp": mp.wan22_animate_mp,
     "mock_mp_analyzer": mp.mock_mp_analyzer,
     "mock_mp": mp.mock_mp,
+    # AI Studio
+    "mock_t2v": MockT2V,
+    "veo": VeoShot,
+    "studio_assembler": StudioAssembler,
 }
 
 

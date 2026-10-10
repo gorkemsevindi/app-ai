@@ -22,7 +22,7 @@ jobs:
         run: |
           pip install "fastapi>=0.115" "uvicorn[standard]" "sqlalchemy>=2" "psycopg[binary]" alembic pydantic-settings \
             "pyjwt[crypto]" boto3 redis httpx python-multipart email-validator pytest pytest-cov ruff \
-            numpy opencv-python-headless "app-store-server-library>=3.1"
+            numpy opencv-python-headless "app-store-server-library>=3.1" "google-genai>=1.30"
       - name: Lint
         run: |
           cd services/api && ruff check .

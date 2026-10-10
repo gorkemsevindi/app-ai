@@ -58,10 +58,15 @@ def delete_user_data(db: Session, user: User, actor_id=None, ip: str | None = No
                .values(status=ProfileStatus.deleted, deleted_at=now, quality_report={}, name="deleted"))
     db.execute(update(SourceVideo).where(SourceVideo.user_id == user.id)
                .values(status=SourceVideoStatus.deleted, deleted_at=now, analysis={}))
-    from ..models import AudioAsset, ShareLink
+    from ..models import AudioAsset, ConsentReceipt, ShareLink, StudioCharacter, StudioProject
     db.execute(update(AudioAsset).where(AudioAsset.user_id == user.id).values(status="deleted", deleted_at=now))
     db.execute(update(ShareLink).where(ShareLink.owner_id == user.id, ShareLink.revoked_at.is_(None))
                .values(revoked_at=now))
+    db.execute(update(ConsentReceipt).where(ConsentReceipt.user_id == user.id, ConsentReceipt.revoked_at.is_(None))
+               .values(revoked_at=now))
+    db.execute(update(StudioCharacter).where(StudioCharacter.user_id == user.id)
+               .values(deleted_at=now, identity_profile_id=None, description="", traits={}))
+    db.execute(update(StudioProject).where(StudioProject.user_id == user.id).values(deleted_at=now))
     job_ids = select(GenerationJob.id).where(GenerationJob.user_id == user.id)
     db.execute(update(GenerationOutput).where(GenerationOutput.job_id.in_(job_ids)).values(deleted_at=now))
     db.execute(update(GenerationJob).where(GenerationJob.user_id == user.id).values(user_text=None))

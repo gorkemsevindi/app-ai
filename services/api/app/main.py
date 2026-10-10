@@ -19,6 +19,7 @@ from .routers import (
     me,
     multiperson,
     sharing,
+    studio,
     templates,
     templates_v3,
     worker,
@@ -64,7 +65,7 @@ def create_app() -> FastAPI:
 
     for r in (auth.router, me.router, identity.router, templates.router, templates_v3.router, generations.router,
               account.router, multiperson.router, admin.router, worker.router, billing.router,
-              sharing.router):
+              sharing.router, studio.router):
         app.include_router(r)
     return app
 

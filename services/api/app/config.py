@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -79,6 +79,10 @@ class Settings(BaseSettings):
     android_sha256_fingerprints: list[str] = []  # signing cert fingerprints for assetlinks.json
     app_store_url: str | None = None
     play_store_url: str | None = None
+
+    # AI Studio director / providers. Read from GEMINI_API_KEY (environment secret), never from code.
+    gemini_api_key: str | None = Field(default=None, validation_alias=AliasChoices("GEMINI_API_KEY",
+                                                                                   "APP_GEMINI_API_KEY"))
 
     cors_origins: list[str] = []
     terms_version: str = "2026-10-01"
