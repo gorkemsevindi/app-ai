@@ -58,3 +58,19 @@ def test_keyframe_expression_matches_shared_interpolation():
         got = eval(e.replace("if(", "_if(").replace("lt(", "_lt("),  # noqa: S307 - our own expression
                    {"_if": lambda c, a, b: a if c else b, "_lt": lambda a, b: a < b, "t": t})
         assert abs(got - want) < 1e-9
+
+
+def test_shape_keeps_its_pixel_size(tmp_path):
+    import cv2
+
+    shape = {"type": "rect", "width": 100, "height": 100, "fill": "#ff0000"}
+    layer = {"clip_id": "s", "z": 0, "kind": "shape", "asset": None, "start_ms": 0, "end_ms": 0, "in_ms": 0,
+             "speed": 1, "reverse": False, "transform": {"x": 0, "y": 0, "scale": 1, "rotation": 0, "opacity": 1},
+             "keyframes": {}, "text": None, "shape": shape, "transition_in": {"type": "none", "ms": 0}, "effects": []}
+    m = {"schema": "rm1", "project_id": "p", "type": "photo", "duration_ms": 0, "audio": [], "subtitles": [],
+         "canvas": {"width": 720, "height": 720, "fps": 30, "background": "#000000"}, "layers": [layer]}
+    img = cv2.imread(str(render(m, {}, "png", "720p", tmp_path)))
+    assert img.shape[:2] == (720, 720)
+    b, g, r = (int(v) for v in img[360, 360])
+    assert r > 240 and g < 15 and b < 15              # centre is the red square
+    assert int(img[360, 200].max()) < 15              # 100 px square must not be scaled to the canvas

@@ -135,8 +135,11 @@ def render(manifest: dict, assets: dict[str, Path], fmt: str, quality: str, work
             graph.append(f"{last}[l{n}]overlay=0:0:eof_action=pass{en}[v{n}]")
             last = f"[v{n}]"
             continue
-        # visual media: fit inside the canvas, then transform
-        chain += f",scale={W}:{H}:force_original_aspect_ratio=decrease,format=rgba"
+        # visual media: fit inside the canvas, then transform (shapes keep their own pixel size)
+        if L["kind"] == "shape":
+            chain += ",format=rgba"
+        else:
+            chain += f",scale={W}:{H}:force_original_aspect_ratio=decrease,format=rgba"
         sc = kf_expr(kf.get("scale"), tf["scale"], "t")
         if kf.get("scale") or tf["scale"] != 1:
             chain += f",scale=w='trunc(iw*({sc})/2)*2':h='trunc(ih*({sc})/2)*2':eval=frame"
