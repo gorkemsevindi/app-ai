@@ -225,10 +225,20 @@ learning_events, prompt_strategies, model_performance_aggregates, creative_prefe
 - ✅ **Aşama A:** denetim ve plan (`docs/V5_AUDIT_AND_PLAN.md`).
 - ✅ **Aşama B:** öğrenme altyapısı. Her biten iş için içerik içermeyen bir kayıt tutuluyor; öğrenme rızası, kullanıcı puanı ve geri bildirim, teknik hafıza (günlük özetler) ve öğrenme paneli var.
 - **Aşama B'den kalan eksikler:**
-  - Mobilde puan verme ve öğrenme rızası ekranları yok; API hazır.
+  - ~~Mobilde puan verme ve öğrenme rızası ekranları yok~~ (Aşama C'de eklendi).
   - Otomatik kalite ölçümleri (kimlik kayması, titreme, talimata uyum) yok.
   - Model eğitimi için içerik saklama kapalı. Açılması için hukuk incelemesi gerekiyor. [HUKUK]
-- **Sırada:** Aşama C (prompt iyileştirici, üç yaratıcı mod, özgünlük ve benzerlik denetimi), ardından Aşama D ve E.
+- ✅ **Aşama C:** prompt iyileştirici, üç yaratıcı mod (sadık, dengeli, deneysel), varyasyonlar, özgünlük ve benzerlik denetimi, çeşitlilik paneli. Mobilde mod seçimi, puan verme ve öğrenme rızası eklendi.
+- ✅ **Aşama D:** yönlendirmede kısıtlı bandit, A/B atamaları, politika yaşam döngüsü (gölge → A/B → aktif) ve otomatik geri alma.
+- ✅ **Aşama E:** model kayıt yönetimi. Lisans, veri hakları ve model kartı kontrol ediliyor; ardından kör değerlendirme, iki kişilik onay ve yayına alma/kaldırma geliyor.
+- **V5'ten kalan eksikler:**
+  - Gerçek ince ayar (fine-tuning) eğitimi, GPU altyapısı ve kendi sunucumuzda çalışan model yok. Lisanslı model ve veri seti gelince yapılacak. [KARAR/HUKUK]
+  - Benzerlik denetimi şimdilik yalnızca metin karşılaştırıyor. Anlamsal ve görsel benzerlik için embedding sağlayıcısı ve kalibrasyon gerekiyor.
+  - Bandit gerçek trafik verisi olmadan anlamlı karar veremez. Canlıda gölge modda başlatılmalı.
+  - Politika ve model kaydı için yönetim arayüzü yok; yalnızca API var.
+  - Otomatik kalite ölçümleri (kimlik kayması, titreme) yok.
+  - Model eğitimi için içerik saklama kapalı ve hukuk incelemesi gerekiyor. [HUKUK]
+- **Sırada:** V6 spesifikasyonu bekleniyor.
 
 ### 5.3 İş bitince: Master Spec güncellemesi
 Kullanıcı talebi: Tüm aşamalar bitince Master Spec güncellenecek. V3, V4 ve V5'i tek belgede birleştiren, uygulanan durumu ("uygulandı / doğrulanmadı / eksik") ve gerçek mimariyi yansıtan güncel bir master spec hazırlanacak.

@@ -57,11 +57,17 @@ def registry(db: Session) -> dict[str, dict]:
 
     _, scfg = studio.config(db)
     _, rcfg = config(db)
-    names = set(scfg["provider_capabilities"]) | set(scfg["provider_usd_per_second"]) | set(rcfg["providers"])
+    from . import model_registry
+
+    gated = {m.provider_name: m for m in model_registry.deployed(db)}  # V5 Phase E: only approved+deployed
+    names = set(scfg["provider_capabilities"]) | set(scfg["provider_usd_per_second"]) | set(rcfg["providers"]) \
+        | set(gated)
     measured = benchmarks.provider_quality(db)
     out = {}
     for n in sorted(names):
         o = rcfg["providers"].get(n, {})
+        if n in gated:
+            o = {"capabilities": gated[n].capabilities, "usd_per_second": gated[n].usd_per_second, **o}
         out[n] = {"capabilities": sorted(set(o.get("capabilities", scfg["provider_capabilities"].get(n, [])))),
                   "usd_per_second": o.get("usd_per_second", scfg["provider_usd_per_second"].get(n)),
                   "quality": measured.get(n, o.get("quality")), "quality_source":
@@ -69,7 +75,7 @@ def registry(db: Session) -> dict[str, dict]:
     return out
 
 
-def choose(db: Session, needed: set[str], tier: str = "standard") -> dict:
+def choose(db: Session, needed: set[str], tier: str = "standard", user_id=None) -> dict:
     from . import studio
 
     enabled, rcfg = config(db)
@@ -103,6 +109,9 @@ def choose(db: Session, needed: set[str], tier: str = "standard") -> dict:
     if not eligible:
         return {"adaptive": True, "provider": None, "fallback": None, "reason": "no_eligible_provider",
                 "candidates": cands}
-    return {"adaptive": True, "provider": eligible[0]["provider"],
-            "fallback": eligible[1]["provider"] if len(eligible) > 1 else None,
-            "reason": "cheapest_eligible" if tier != "premium" else "best_quality", "candidates": cands}
+    route = {"adaptive": True, "provider": eligible[0]["provider"],
+             "fallback": eligible[1]["provider"] if len(eligible) > 1 else None,
+             "reason": "cheapest_eligible" if tier != "premium" else "best_quality", "candidates": cands}
+    from . import policies  # V5 Phase D: a live learning policy may explore among the eligible providers
+
+    return policies.apply(db, route, user_id, needed)

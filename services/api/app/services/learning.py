@@ -135,7 +135,7 @@ def record_outcome(db: Session, job: GenerationJob) -> LearningEvent | None:
         actual_cost_usd=round(sum(r.est_cost_usd or 0.0 for r in runs), 5),
         quality=_numeric_qa((runs[-1].metrics or {}).get("qa") if runs else None),
         consent={k: c[k] for k in ("technical_improvement", "content_training")}, purpose="technical_improvement",
-        provenance={"source": "api.job_terminal", "schema": SCHEMA_VERSION},
+        provenance={"source": "api.job_terminal", "schema": SCHEMA_VERSION, "routing": spec.get("routing")},
         retention_until=_now() + timedelta(days=int(cfg["retention_days"])))
     db.add(ev)
     return ev

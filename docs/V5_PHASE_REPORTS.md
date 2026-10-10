@@ -169,3 +169,97 @@ Migration: `0012_creative_intelligence` (additive, reversible): `prompt_strategi
 ### Next step
 
 Phase D: constrained bandit for technical routing, experiment assignments, and versioned learning policies (shadow → A/B → monitored expansion, with automatic rollback).
+
+---
+
+## Phase D — Adaptive technical policies (constrained bandit, experiments, rollback)
+
+### What changed
+
+**New tables (migration 0013)**
+- `learning_policy_versions`: versioned policies. Each one records its status, rollout %, config, evidence and an append-only history.
+- `experiment_assignments`: sticky, server-side variant assignment per user and experiment.
+
+**`app/services/policies.py`**
+- **Constrained Thompson sampling.**
+  - It chooses only among providers the router has already marked eligible (kill switch, capabilities, price, health and quality floor all still apply).
+  - It also only considers providers within `max_cost_increase` of the baseline route's cost.
+  - Posteriors come from `model_performance_aggregates` (success counts).
+  - `exploration_share` controls how often it samples instead of exploiting.
+- **Lifecycle:** `draft → shadow → ab → active`, with `rolled_back` / `retired`.
+  - Only one live policy per kind (`policy_conflict`).
+  - **Shadow:** the candidate decision is logged, but the baseline route is used.
+  - **A/B:** rollout is limited to 1–50 % and needs shadow evidence (`min_samples`).
+  - **Active:** needs A/B evidence where the candidate is non-inferior on success rate and cost per success.
+  - Every transition is made by an admin, includes a note, and is written to the history.
+- **Guard (`policy_guard` scheduler task):** if the candidate arm regresses against baseline (success rate, cost per success, latency) beyond the configured margins, the policy is **rolled back automatically** to 0 % and the history records `by: guard`.
+- **Pricing invariant:** exploration never changes what the user is charged. The credit quote comes from the price schedule, not from the provider chosen.
+
+**Integration**
+- `router.choose(..., user_id)` passes the adaptive route through `policies.apply`.
+- The Studio estimate returns `routing_policy` (version, variant, mode, candidate provider).
+- The render spec stores it, and the learning events carry it as provenance. This means outcomes can be attributed per policy version and arm.
+
+**Admin API**
+- `POST/GET /admin/learning/policies`
+- `POST /admin/learning/policies/{id}/transition`
+- `GET /admin/learning/policies/{id}/evaluation`
+
+### Tests (`test_policies.py`, 4)
+- The bandit never leaves the eligible set or the cost budget.
+- Lifecycle: shadow logs without changing the route; A/B is sticky and capped at 50 %; promotion needs evidence.
+- Credits are identical in both arms.
+- The guard rolls back a regression automatically, and everyone returns to the baseline.
+- The render spec and learning events carry the policy provenance.
+
+### Known limitations
+- The posteriors only become meaningful with real traffic. Today they are fed by mock and test data.
+- Only technical routing is learned. Creative strategies stay versioned and admin-selected; there is no automatic creative bandit.
+- There is no admin UI for policies yet; only the API exists.
+
+---
+
+## Phase E — Optional fine-tuning governance (model registry)
+
+### What changed
+This phase includes **no training code**. Its job is to ensure that no self-hosted or fine-tuned model can reach users without passing the V5 §6 governance gate.
+
+**New table (migration 0014):** `model_registry_versions`.
+
+**`app/services/model_registry.py`**
+- **Registration gate.** A model is accepted only if all of the following hold:
+  - the licence is verified and allows commercial use;
+  - the external dataset reference is rights-cleared;
+  - **no user content** is included (no consented training corpus exists);
+  - third-party model outputs are included only with a contract reference;
+  - the model card is complete (intended use, limitations, training data, evaluation, ethics).
+- **Evaluation.** It uses a blind-reviewed benchmark run for the model. Quality must reach `min_reviews` and must not regress more than `max_quality_regression` below the best other provider.
+- **Two-person approval.** It requires a passing evaluation and two different admins. Approval does not deploy.
+- **Deploy and retire.**
+  - A deployed model appears in the router registry with its declared capabilities and price.
+  - Kill switch, health checks and the quality floor still apply to it.
+  - A retired model disappears from the registry.
+
+**Admin API**
+- `POST /admin/model-registry`
+- `POST /admin/model-registry/{id}/evaluation`
+- `POST /admin/model-registry/{id}/decision` (approve, deploy, reject, retire)
+
+### Tests (`test_model_registry.py`, 2)
+- All governance failures are reported together; bad input is rejected; non-admins are refused.
+- A regressing evaluation fails.
+- One approval is not enough, and the same admin cannot approve twice.
+- An approved model is not routable until deployed; a deployed model is routable; retiring removes it.
+
+### Known limitations
+- There is no training pipeline, GPU infrastructure or self-hosted inference worker. These are deliberately out of scope until a licensed model and dataset exist.
+- The licence and dataset attestations are declarations by admins. Legal review of each artifact is still required.
+
+---
+
+## V5 final state
+- Phases **A–E complete.**
+- **API: full suite green.**
+- **Worker:** 20/20.
+- **Mobile:** `tsc` clean.
+- `alembic check` shows no drift (through 0014).

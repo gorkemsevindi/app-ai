@@ -603,20 +603,20 @@ def estimate(db: Session, user: User, project: StudioProject, v: StudioProjectVe
     return {**out, "version_id": str(v.id), "version": v.version, "director": v.director}
 
 
-def route_for(db: Session, sb: Storyboard) -> dict:
+def route_for(db: Session, sb: Storyboard, user_id: uuid.UUID | None = None) -> dict:
     """Provider for this storyboard: one provider per render keeps the look consistent across shots."""
     from . import router
 
     needed: set[str] = set()
     for s in sb.shots():
         needed |= needed_capabilities(_shot_inputs(db, sb, s, ""))
-    return router.choose(db, needed, sb.quality)
+    return router.choose(db, needed, sb.quality, user_id)
 
 
 def estimate_storyboard(db: Session, user: User, project: StudioProject, storyboard: dict) -> dict:
     cfg = require_enabled(db)
     sb = Storyboard.model_validate(storyboard)
-    route = route_for(db, sb)
+    route = route_for(db, sb, user.id)
     provider = route["provider"]
     from . import router
 
@@ -662,6 +662,7 @@ def estimate_storyboard(db: Session, user: User, project: StudioProject, storybo
     if provider is None:
         limitations.append("No video provider currently meets the quality, health and capability requirements.")
     return {"provider": provider, "fallback_provider": route["fallback"], "routing": route["reason"],
+            "routing_policy": route.get("policy"),
             "shots": rows,
             "new_shots": sum(1 for r in rows if r["status"] == "new"),
             "reused_shots": sum(1 for r in rows if r["status"] != "new"),
@@ -732,7 +733,7 @@ def render(db: Session, user: User, project: StudioProject, version_id: uuid.UUI
         spec = {"shot": shot.model_dump(mode="json"), "inputs": inp, "content_hash": row["hash"],
                 "project_version_id": str(v.id), "resolution": RESOLUTIONS[sb.aspect_ratio],
                 "creative_mode": sb.creative_mode or "manual", "prompt_strategy": sb.prompt_strategy or "v0",
-                "seed": sb.seed}
+                "seed": sb.seed, "routing": est.get("routing_policy")}
         if shot.derive is not None:  # extension: the worker needs the source render's boundary frames
             src = db.execute(select(StudioShotRender).where(StudioShotRender.project_id == project.id,
                                                             StudioShotRender.content_hash == shot.derive.from_hash)

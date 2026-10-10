@@ -936,6 +936,64 @@ class SimilarityAudit(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
 
+class LearningPolicyVersion(Base):
+    """A versioned adaptive policy (e.g. routing). Lifecycle: draft -> shadow -> ab -> active, with rollback;
+    promotion is always a human decision backed by evidence, rollback can be automatic (V5 §6)."""
+
+    __tablename__ = "learning_policy_versions"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    kind: Mapped[str] = mapped_column(String(20))  # routing
+    version: Mapped[int] = mapped_column(Integer)
+    config: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    status: Mapped[str] = mapped_column(String(16), default="draft")  # draft|shadow|ab|active|rolled_back|retired
+    rollout_pct: Mapped[int] = mapped_column(Integer, default=0)
+    evaluation: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    history: Mapped[list[Any]] = mapped_column(JSONB, default=list)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (UniqueConstraint("kind", "version", name="uq_learning_policy_version"),)
+
+
+class ExperimentAssignment(Base):
+    """Server-side, sticky experiment assignment (one row per user and experiment)."""
+
+    __tablename__ = "experiment_assignments"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    experiment_key: Mapped[str] = mapped_column(String(80))
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    variant: Mapped[str] = mapped_column(String(20))  # baseline|candidate
+    policy_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    assigned_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (UniqueConstraint("experiment_key", "user_id", name="uq_experiment_assignment"),)
+
+
+class ModelRegistryVersion(Base):
+    """Governance record for a self-hosted / fine-tuned model artifact (V5 Phase E). It can only reach the router
+    after licence, data-rights, model-card, evaluation and two-person human approval gates pass."""
+
+    __tablename__ = "model_registry_versions"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    provider_name: Mapped[str] = mapped_column(String(60))
+    version: Mapped[int] = mapped_column(Integer)
+    base_model: Mapped[str] = mapped_column(String(120))
+    license: Mapped[str] = mapped_column(String(120))
+    attestations: Mapped[dict[str, Any]] = mapped_column(JSONB)  # licence/data/rights checks + evidence refs
+    model_card: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    capabilities: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    usd_per_second: Mapped[float] = mapped_column(Float)
+    eval_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    evaluation: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    approvals: Mapped[list[Any]] = mapped_column(JSONB, default=list)
+    status: Mapped[str] = mapped_column(String(16), default="registered")
+    # registered|approved|deployed|rejected|retired
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (UniqueConstraint("provider_name", "version", name="uq_model_registry_version"),)
+
+
 class ShareLink(Base):
     """Server-issued share link ("Try this template"). The public token is `code.signature`; only `code`
     is stored. Links point at a template, never at a user's private output video."""

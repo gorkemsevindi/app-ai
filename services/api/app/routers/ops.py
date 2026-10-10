@@ -121,3 +121,120 @@ def scheduler_runs(task: str | None = None, _: User = Depends(staff_user), db: S
                        "started_at": r.started_at.isoformat(),
                        "finished_at": r.finished_at.isoformat() if r.finished_at else None}
                       for r in db.execute(q).scalars()]}
+
+
+# ---------------------------------------------------------------- V5 Phase D: learning policies
+
+class PolicyIn(BaseModel):
+    kind: str = "routing"
+    config: dict = {}
+
+
+@router.post("/admin/learning/policies", status_code=201)
+def create_policy(body: PolicyIn, request: Request, admin: User = Depends(admin_user), db: Session = Depends(get_db)):
+    from ..services import policies
+
+    p = policies.create(db, admin, body.kind, body.config)
+    audit(db, admin.id, "learning_policy.created", "learning_policy", str(p.id), {"version": p.version},
+          ip=client_ip(request))
+    db.commit()
+    return _policy_out(p)
+
+
+def _policy_out(p) -> dict:
+    return {"id": str(p.id), "kind": p.kind, "version": p.version, "status": p.status, "rollout_pct": p.rollout_pct,
+            "config": p.config, "evaluation": p.evaluation, "history": p.history}
+
+
+@router.get("/admin/learning/policies")
+def list_policies(_: User = Depends(staff_user), db: Session = Depends(get_db)):
+    from ..models import LearningPolicyVersion
+
+    rows = db.execute(select(LearningPolicyVersion).order_by(LearningPolicyVersion.created_at.desc())).scalars()
+    return {"items": [_policy_out(p) for p in rows]}
+
+
+class TransitionIn(BaseModel):
+    to: str = Field(pattern=r"^(shadow|ab|active|rolled_back|retired)$")
+    rollout_pct: int | None = Field(default=None, ge=0, le=100)
+    note: str = Field(min_length=3, max_length=300)
+
+
+@router.post("/admin/learning/policies/{policy_id}/transition")
+def transition_policy(policy_id: uuid.UUID, body: TransitionIn, request: Request, admin: User = Depends(admin_user),
+                      db: Session = Depends(get_db)):
+    from ..services import policies
+
+    p = policies.get(db, policy_id)
+    policies.transition(db, admin, p, body.to, body.rollout_pct, body.note)
+    audit(db, admin.id, f"learning_policy.{body.to}", "learning_policy", str(p.id),
+          {"version": p.version, "rollout_pct": p.rollout_pct, "note": body.note}, ip=client_ip(request))
+    db.commit()
+    return _policy_out(p)
+
+
+@router.get("/admin/learning/policies/{policy_id}/evaluation")
+def policy_evaluation(policy_id: uuid.UUID, _: User = Depends(staff_user), db: Session = Depends(get_db)):
+    from ..services import policies
+
+    return policies.evaluate(db, policies.get(db, policy_id))
+
+
+# ---------------------------------------------------------------- V5 Phase E: model registry governance
+
+def _model_out(m) -> dict:
+    return {"id": str(m.id), "provider_name": m.provider_name, "version": m.version, "base_model": m.base_model,
+            "license": m.license, "status": m.status, "capabilities": m.capabilities,
+            "usd_per_second": m.usd_per_second, "evaluation": m.evaluation, "approvals": m.approvals,
+            "attestations": m.attestations, "model_card": m.model_card}
+
+
+@router.post("/admin/model-registry", status_code=201)
+def register_model(body: dict, request: Request, admin: User = Depends(admin_user), db: Session = Depends(get_db)):
+    from ..services import model_registry
+
+    m = model_registry.register(db, admin, body)
+    audit(db, admin.id, "model_registry.registered", "model_registry", str(m.id),
+          {"provider": m.provider_name, "version": m.version, "license": m.license}, ip=client_ip(request))
+    db.commit()
+    return _model_out(m)
+
+
+class ModelEvalIn(BaseModel):
+    benchmark_run_id: uuid.UUID
+    min_reviews: int = Field(default=10, ge=1)
+    max_quality_regression: float = Field(default=0.05, ge=0, le=1)
+
+
+@router.post("/admin/model-registry/{model_id}/evaluation")
+def evaluate_model(model_id: uuid.UUID, body: ModelEvalIn, admin: User = Depends(admin_user),
+                   db: Session = Depends(get_db)):
+    from ..services import model_registry
+
+    m = model_registry.get(db, model_id)
+    m.eval_run_id = body.benchmark_run_id
+    m.evaluation = model_registry.evaluate(db, m, body.benchmark_run_id, body.min_reviews,
+                                           body.max_quality_regression)
+    db.commit()
+    return _model_out(m)
+
+
+class ModelDecisionIn(BaseModel):
+    action: str = Field(pattern=r"^(approve|deploy|reject|retire)$")
+    note: str = Field(min_length=3, max_length=300)
+
+
+@router.post("/admin/model-registry/{model_id}/decision")
+def model_decision(model_id: uuid.UUID, body: ModelDecisionIn, request: Request, admin: User = Depends(admin_user),
+                   db: Session = Depends(get_db)):
+    from ..services import model_registry
+
+    m = model_registry.get(db, model_id)
+    if body.action == "approve":
+        model_registry.approve(db, admin, m, body.note)
+    else:
+        model_registry.set_status(m, {"deploy": "deployed", "reject": "rejected", "retire": "retired"}[body.action])
+    audit(db, admin.id, f"model_registry.{body.action}", "model_registry", str(m.id),
+          {"status": m.status, "note": body.note}, ip=client_ip(request))
+    db.commit()
+    return _model_out(m)

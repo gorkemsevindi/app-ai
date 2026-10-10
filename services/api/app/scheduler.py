@@ -124,6 +124,13 @@ def learning_aggregate(db: Session) -> dict:
     return {"groups": learning.aggregate(db, today - timedelta(days=1)) + learning.aggregate(db, today)}
 
 
+def policy_guard(db: Session) -> dict:
+    """V5 Phase D: evaluate live learning policies, roll back automatically on regression."""
+    from .services import policies
+
+    return policies.guard(db)
+
+
 TASKS: dict[str, Callable[[Session], dict]] = {
     "template_metrics": template_metrics,
     "credit_expiry": credit_expiry,
@@ -132,6 +139,7 @@ TASKS: dict[str, Callable[[Session], dict]] = {
     "play_finalize_retry": play_finalize_retry,
     "webhook_retry": webhook_retry,
     "learning_aggregate": learning_aggregate,
+    "policy_guard": policy_guard,
 }
 
 
