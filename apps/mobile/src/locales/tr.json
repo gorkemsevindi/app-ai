@@ -1,41 +1,133 @@
 {
-  "app": { "tagline": "Trendlerin içinde sen ol." },
+  "app": {
+    "tagline": "Trendlerin içinde sen ol."
+  },
   "onboarding": {
     "headline": "Günün trendlerinde başrol sensin",
     "sub": "Birkaç selfie'yi bir kez ekle. Sonra bir şablona dokun, yaklaşık bir dakikada dikey videonu al.",
-    "step1": "Yüz profilini bir kez oluştur", "step2": "Trend bir şablon seç", "step3": "TikTok, Reels veya Shorts'ta paylaş",
+    "step1": "Yüz profilini bir kez oluştur",
+    "step2": "Trend bir şablon seç",
+    "step3": "TikTok, Reels veya Shorts'ta paylaş",
     "age": "18 yaşından büyüğüm",
     "terms": "Kullanım Koşulları'nı, Gizlilik Politikası'nı ve Topluluk Kuralları'nı kabul ediyorum",
     "continue": "Başla"
   },
-  "auth": { "email": "E-posta", "password": "Şifre (en az 8 karakter)", "signUp": "Hesap oluştur", "signIn": "Giriş yap", "haveAccount": "Zaten hesabım var", "noAccount": "Yeni hesap oluştur", "apple": "Apple ile devam et", "google": "Google ile devam et" },
-  "tabs": { "discover": "Keşfet", "video": "Senin videon", "library": "Videolarım", "profile": "Profil" },
-  "discover": { "credits": "{{count}} kredi", "createProfile": "Başlamak için yüz profilini oluştur", "empty": "Burada henüz şablon yok." },
-  "categories": { "trending": "Trend", "new": "Yeni", "funny": "Komik", "cinematic": "Sinematik", "dance": "Dans", "fashion": "Moda", "travel": "Seyahat", "fantasy": "Fantastik" },
-  "template": { "cost": "{{count}} kredi", "eta": "yaklaşık {{eta}}", "addText": "Kısa bir açıklama ekle (isteğe bağlı)", "generate": "Videomu oluştur", "pro": "Pro" },
-  "identity": { "title": "Yüz profilin", "explain": "Kendinin 5–10 net fotoğrafını seç: farklı açılar, iyi ışık, karede sadece sen.", "consent": "Bu fotoğraflar beni gösteriyor ya da fotoğraftaki kişinin açık izni var.", "pick": "Fotoğraf seç", "uploading": "Yükleniyor {{done}}/{{total}}", "ready": "Profil hazır!", "needMore": "{{count}} fotoğraf daha ekle", "delete": "Profili ve fotoğrafları sil" },
+  "auth": {
+    "email": "E-posta",
+    "password": "Şifre (en az 8 karakter)",
+    "signUp": "Hesap oluştur",
+    "signIn": "Giriş yap",
+    "haveAccount": "Zaten hesabım var",
+    "noAccount": "Yeni hesap oluştur",
+    "apple": "Apple ile devam et",
+    "google": "Google ile devam et"
+  },
+  "tabs": {
+    "discover": "Keşfet",
+    "video": "Senin videon",
+    "library": "Videolarım",
+    "profile": "Profil"
+  },
+  "discover": {
+    "credits": "{{count}} kredi",
+    "createProfile": "Başlamak için yüz profilini oluştur",
+    "empty": "Burada henüz şablon yok."
+  },
+  "categories": {
+    "trending": "Trend",
+    "new": "Yeni",
+    "funny": "Komik",
+    "cinematic": "Sinematik",
+    "dance": "Dans",
+    "fashion": "Moda",
+    "travel": "Seyahat",
+    "fantasy": "Fantastik",
+    "multi_person": "Çok kişili"
+  },
+  "template": {
+    "cost": "{{count}} kredi",
+    "eta": "yaklaşık {{eta}}",
+    "addText": "Kısa bir açıklama ekle (isteğe bağlı)",
+    "generate": "Videomu oluştur",
+    "pro": "Pro"
+  },
+  "identity": {
+    "title": "Yüz profilin",
+    "explain": "Kendinin 5–10 net fotoğrafını seç: farklı açılar, iyi ışık, karede sadece sen.",
+    "consent": "Bu fotoğraflar beni gösteriyor ya da fotoğraftaki kişinin açık izni var.",
+    "pick": "Fotoğraf seç",
+    "uploading": "Yükleniyor {{done}}/{{total}}",
+    "ready": "Profil hazır!",
+    "needMore": "{{count}} fotoğraf daha ekle",
+    "delete": "Profili ve fotoğrafları sil"
+  },
   "job": {
     "title": "Videon",
-    "stage": { "queued": "Sırada", "preparing": "Fotoğrafların hazırlanıyor", "generating": "Videon oluşturuluyor", "finishing": "Son dokunuşlar", "completed": "Hazır!", "failed": "Bir sorun oluştu", "cancelled": "İptal edildi" },
-    "position": "Sırada {{n}}.", "eta": "Yaklaşık {{eta}} kaldı", "notifyHint": "Bu ekrandan çıkabilirsin, çalışmaya devam ediyoruz.",
-    "cancel": "İptal", "retry": "Tekrar dene", "refunded": "Kredilerin iade edildi.",
-    "download": "Fotoğraflar'a kaydet", "share": "Paylaş", "report": "Bildir", "regenerate": "Bir tane daha yap",
-    "reported": "Teşekkürler, ekibimiz inceleyecek.", "aiLabel": "Yapay zekâ ile üretildi"
+    "stage": {
+      "queued": "Sırada",
+      "preparing": "Fotoğrafların hazırlanıyor",
+      "generating": "Videon oluşturuluyor",
+      "finishing": "Son dokunuşlar",
+      "completed": "Hazır!",
+      "failed": "Bir sorun oluştu",
+      "cancelled": "İptal edildi"
+    },
+    "position": "Sırada {{n}}.",
+    "eta": "Yaklaşık {{eta}} kaldı",
+    "notifyHint": "Bu ekrandan çıkabilirsin, çalışmaya devam ediyoruz.",
+    "cancel": "İptal",
+    "retry": "Tekrar dene",
+    "refunded": "Kredilerin iade edildi.",
+    "download": "Fotoğraflar'a kaydet",
+    "share": "Paylaş",
+    "report": "Bildir",
+    "regenerate": "Bir tane daha yap",
+    "reported": "Teşekkürler, ekibimiz inceleyecek.",
+    "aiLabel": "Yapay zekâ ile üretildi"
   },
-  "report": { "title": "Sorun ne?", "sexual": "Cinsel içerik", "minor_safety": "Reşit olmayan biri var", "impersonation": "Kimliğe bürünme / sahte", "harassment": "Taciz", "violence": "Şiddet", "copyright": "Telif hakkı", "low_quality": "Düşük kalite", "other": "Diğer" },
+  "report": {
+    "title": "Sorun ne?",
+    "sexual": "Cinsel içerik",
+    "minor_safety": "Reşit olmayan biri var",
+    "impersonation": "Kimliğe bürünme / sahte",
+    "harassment": "Taciz",
+    "violence": "Şiddet",
+    "copyright": "Telif hakkı",
+    "low_quality": "Düşük kalite",
+    "other": "Diğer"
+  },
   "multi": {
     "title": "Senin videon, yeni yüzler",
     "intro": "Sahibi olduğun bir klibi yükle. En fazla {{max}} kişiyi bulalım, hangisinin yüz profillerinle değişeceğini sen seç.",
     "rights": "Bu videonun sahibiyim ya da kullanma hakkım var.",
     "consent": "Yüzü değiştirilecek herkes buna onay verdi.",
-    "pick": "Video seç ({{min}}–{{max}} sn)", "analyzing": "Videondaki kişiler bulunuyor…",
-    "people": "Kim değişsin?", "assign": "Yüz profili seç", "keep": "Orijinal kalsın",
+    "pick": "Video seç ({{min}}–{{max}} sn)",
+    "analyzing": "Videondaki kişiler bulunuyor…",
+    "people": "Kim değişsin?",
+    "assign": "Yüz profili seç",
+    "keep": "Orijinal kalsın",
     "notSelectable": "Değiştirilemez (yüz çok küçük ya da görünmüyor)",
-    "preview": "Hızlı önizleme ({{credits}} kredi)", "generate": "Videoyu oluştur ({{credits}} kredi)",
-    "rejected": "Bu videoyu kullanamıyoruz", "disabled": "Bölgende yakında."
+    "preview": "Hızlı önizleme ({{credits}} kredi)",
+    "generate": "Videoyu oluştur ({{credits}} kredi)",
+    "rejected": "Bu videoyu kullanamıyoruz",
+    "disabled": "Bölgende yakında."
   },
-  "profile": { "credits": "Kredi", "plan": "Plan", "faceProfiles": "Yüz profilleri", "newProfile": "Yeni yüz profili", "language": "Dil", "signOut": "Çıkış yap", "deleteAccount": "Hesabı sil", "deleteConfirm": "Hesabın, yüz profillerin ve videoların kalıcı olarak silinir. Bu geri alınamaz.", "deleteDone": "Hesabın silindi." },
-  "paywall": { "title": "Daha fazla kredi al", "sub": "Pro: aylık kredi, öncelikli sıra, filigransız.", "comingSoon": "Uygulama içi satın alma hazırlanıyor." },
+  "profile": {
+    "credits": "Kredi",
+    "plan": "Plan",
+    "faceProfiles": "Yüz profilleri",
+    "newProfile": "Yeni yüz profili",
+    "language": "Dil",
+    "signOut": "Çıkış yap",
+    "deleteAccount": "Hesabı sil",
+    "deleteConfirm": "Hesabın, yüz profillerin ve videoların kalıcı olarak silinir. Bu geri alınamaz.",
+    "deleteDone": "Hesabın silindi."
+  },
+  "paywall": {
+    "title": "Daha fazla kredi al",
+    "sub": "Pro: aylık kredi, öncelikli sıra, filigransız.",
+    "comingSoon": "Uygulama içi satın alma hazırlanıyor."
+  },
   "errors": {
     "generic": "Bir sorun oluştu. Lütfen tekrar dene.",
     "insufficient_credits": "Bunun için yeterli kredin yok.",
@@ -52,6 +144,20 @@
     "person_not_selectable": "Bu kişi bu videoda değiştirilemez.",
     "too_many_persons": "Çok fazla kişi seçtin.",
     "file_too_large": "Dosya çok büyük.",
-    "unsupported_media_type": "Bu dosya türü desteklenmiyor."
+    "unsupported_media_type": "Bu dosya türü desteklenmiyor.",
+    "slots_missing": "Zorunlu rolleri doldur.",
+    "template_unavailable": "Bu şablon güncelleniyor, birazdan tekrar dene.",
+    "confirmation_required": "Devam etmeden önce fiyatı onayla."
+  },
+  "remix": {
+    "slots": "Kim oynasın?",
+    "pick": "Yüz profili seç",
+    "keep": "Orijinal kalsın",
+    "required": "zorunlu",
+    "generate": "Videoyu oluştur ({{credits}} kredi)",
+    "confirm": "Bu video {{credits}} kredi tutacak. Devam edilsin mi?",
+    "people": "{{count}} kişi",
+    "uses": "{{count}} kullanım",
+    "official": "Resmi"
   }
 }

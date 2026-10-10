@@ -358,6 +358,9 @@ def complete(db: Session, job_id: uuid.UUID, worker_id: str, attempt: int, outpu
         duration_ms=int(output.get("duration_ms", 5000)), size_bytes=int(head["size"]),
         codec=str(output.get("codec", "h264")), watermarked=job.watermark,
         provenance={"ai_generated": True, "model": job.model_used, "job_id": str(job.id),
+                    "template_id": str(job.template_id) if job.template_id else None,
+                    "template_version_id": str(job.template_version_id) if job.template_version_id else None,
+                    "source_video_id": str(job.source_video_id) if job.source_video_id else None,
                     "c2pa": bool(output.get("c2pa")), "generated_at": now().isoformat()},
     ))
     job.progress = 1.0

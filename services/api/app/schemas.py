@@ -128,6 +128,10 @@ class TemplateOut(ORM):
     est_seconds: int
     accepts_text: bool
     pro_only: bool
+    # V3 additive fields (older clients ignore them)
+    mode: str = "single"
+    person_slots: list[dict] = []
+    est_credits: int | None = None
 
 
 # ---- generations

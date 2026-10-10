@@ -3,13 +3,14 @@ financial and job state; Redis only holds disposable data (rate-limit counters).
 
 import enum
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     Enum,
     Float,
@@ -163,6 +164,13 @@ class Template(TimestampMixin, Base):
     current_version_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("template_versions.id", use_alter=True, name="fk_templates_current_version"))
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # V3 (spec §3/§26). Defaults keep pre-V3 templates public + approved, so nothing changes for them.
+    creator_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)
+    visibility: Mapped[str] = mapped_column(String(16), default="public", server_default="public")
+    # draft|private|unlisted|public|blocked
+    moderation_status: Mapped[str] = mapped_column(String(16), default="approved", server_default="approved")
+    # pending|approved|rejected|review
+    commercial_rights: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, server_default="{}")
 
     __table_args__ = (CheckConstraint("credit_cost >= 0", name="ck_templates_cost_nonneg"),)
 
@@ -182,8 +190,50 @@ class TemplateVersion(Base):
     params: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
     created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # V3: canonical source clip (analysed into person tracks), provider-neutral config and pricing rule.
+    source_video_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("source_videos.id", ondelete="SET NULL"))
+    config: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, server_default="{}")
+    credit_rule: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, server_default="{}")
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    slots: Mapped[list["TemplatePersonSlot"]] = relationship(order_by="TemplatePersonSlot.position")
 
     __table_args__ = (UniqueConstraint("template_id", "version", name="uq_template_versions_version"),)
+
+
+class TemplatePersonSlot(Base):
+    """Variable-length person slots (1..N, spec §26). `slot_id` is stable across versions so analytics,
+    saved assignments and deep links survive re-ingestion; `track_id` maps to the source clip's tracks."""
+
+    __tablename__ = "template_person_slots"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    template_version_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("template_versions.id", ondelete="CASCADE"),
+                                                           index=True)
+    slot_id: Mapped[str] = mapped_column(String(32))
+    position: Mapped[int] = mapped_column(Integer)
+    label: Mapped[str] = mapped_column(String(60))
+    track_id: Mapped[int] = mapped_column(Integer)
+    required: Mapped[bool] = mapped_column(Boolean, default=False)
+    requirements: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+
+    __table_args__ = (UniqueConstraint("template_version_id", "slot_id", name="uq_template_slots_slot"),
+                      UniqueConstraint("template_version_id", "track_id", name="uq_template_slots_track"))
+
+
+class TemplateMetricDaily(Base):
+    """Template metrics aggregated separately from operational tables (spec §3); feeds ranking + dashboards."""
+
+    __tablename__ = "template_metrics_daily"
+    template_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("templates.id", ondelete="CASCADE"), primary_key=True)
+    day: Mapped[date] = mapped_column(Date, primary_key=True)
+    opens: Mapped[int] = mapped_column(Integer, default=0)
+    shares: Mapped[int] = mapped_column(Integer, default=0)
+    generations: Mapped[int] = mapped_column(Integer, default=0)
+    successes: Mapped[int] = mapped_column(Integer, default=0)
+    failures: Mapped[int] = mapped_column(Integer, default=0)
+    paid_uses: Mapped[int] = mapped_column(Integer, default=0)
+    reports: Mapped[int] = mapped_column(Integer, default=0)
+    credits_charged: Mapped[int] = mapped_column(Integer, default=0)
+    cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
 
 
 class JobStatus(str, enum.Enum):

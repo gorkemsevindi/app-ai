@@ -9,7 +9,7 @@ from sqlalchemy import text
 
 from .config import get_settings
 from .db import get_engine
-from .routers import account, admin, auth, generations, identity, me, multiperson, templates, worker
+from .routers import account, admin, auth, generations, identity, me, multiperson, templates, templates_v3, worker
 
 log = logging.getLogger("api")
 
@@ -49,8 +49,8 @@ def create_app() -> FastAPI:
             c.execute(text("select 1"))
         return {"ok": True}
 
-    for r in (auth.router, me.router, identity.router, templates.router, generations.router, account.router,
-              multiperson.router, admin.router, worker.router):
+    for r in (auth.router, me.router, identity.router, templates.router, templates_v3.router, generations.router,
+              account.router, multiperson.router, admin.router, worker.router):
         app.include_router(r)
     return app
 

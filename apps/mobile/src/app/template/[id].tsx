@@ -4,8 +4,10 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Alert, ScrollView, TextInput, View } from 'react-native';
 
-import { Body, Button, Title } from '@/components/ui';
-import { api, ApiError, newIdempotencyKey, type Generation, type Profile, type Template } from '@/lib/api';
+import { Body, Button, Chip, Title } from '@/components/ui';
+import {
+  api, ApiError, newIdempotencyKey, type Estimate, type Generation, type Profile, type Template,
+} from '@/lib/api';
 import { errorMessage } from '@/lib/errors';
 import { formatEta } from '@/lib/progress';
 import { radius, spacing, useColors } from '@/lib/theme';
@@ -16,6 +18,10 @@ export default function TemplateDetail() {
   const c = useColors();
   const [tpl, setTpl] = useState<Template | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [profiles, setProfiles] = useState<Profile[]>([]);
+  // Remix templates: slot_id -> profile id (absent = keep the original person in that role).
+  const [cast, setCast] = useState<Record<string, string>>({});
+  const [quote, setQuote] = useState<Estimate | null>(null);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   // One key per screen visit: double taps / network retries can't create (or charge) twice.
@@ -28,8 +34,68 @@ export default function TemplateDetail() {
 
   useEffect(() => {
     api<Template>(`/templates/${id}`).then(setTpl);
-    api<Profile[]>('/identity-profiles').then((ps) => setProfile(ps.find((p) => p.status === 'ready') ?? null));
+    api<Profile[]>('/identity-profiles').then((ps) => {
+      const ready = ps.filter((p) => p.status === 'ready');
+      setProfiles(ready);
+      setProfile(ready[0] ?? null);
+    });
   }, [id]);
+
+  const isRemix = tpl?.mode === 'remix' && (tpl.person_slots?.length ?? 0) > 0;
+
+  // Default casting: the user's first profile in the first slot.
+  useEffect(() => {
+    if (isRemix && profile && tpl?.person_slots && Object.keys(cast).length === 0) {
+      setCast({ [tpl.person_slots[0].slot_id]: profile.id });
+    }
+  }, [isRemix, profile, tpl, cast]);
+
+  // Server-side quote whenever the casting changes (spec: show the exact price before generating).
+  useEffect(() => {
+    if (!isRemix) return;
+    api<Estimate>('/generations/estimate', { body: { template_id: id, slots: Object.keys(cast) } })
+      .then(setQuote).catch(() => setQuote(null));
+  }, [isRemix, cast, id]);
+
+  const cycleSlot = (slotId: string) => {
+    const order = [undefined, ...profiles.map((p) => p.id)];
+    const next = order[(order.indexOf(cast[slotId]) + 1) % order.length];
+    setCast((cur) => {
+      const copy = { ...cur };
+      if (next) copy[slotId] = next; else delete copy[slotId];
+      return copy;
+    });
+  };
+
+  const remix = async () => {
+    if (!profile) return router.push('/identity/new');
+    const assignments = Object.entries(cast).map(([slot_id, profile_id]) => ({ slot_id, profile_id }));
+    const send = async () => {
+      setBusy(true);
+      try {
+        const job = await api<Generation>('/generations/remix', {
+          body: { template_id: id, assignments, confirmed_credits: quote?.credits ?? null },
+          idempotencyKey: idemKey.current,
+        });
+        router.replace({ pathname: '/job/[id]', params: { id: job.id } });
+      } catch (e) {
+        if (e instanceof ApiError && (e.code === 'insufficient_credits' || e.code === 'pro_required')) {
+          router.push('/paywall');
+        } else {
+          Alert.alert(errorMessage(t, e));
+        }
+      } finally {
+        setBusy(false);
+      }
+    };
+    if (quote?.confirm_required) {
+      Alert.alert(t('remix.confirm', { credits: quote.credits }), undefined, [
+        { text: t('job.cancel'), style: 'cancel' }, { text: 'OK', onPress: send },
+      ]);
+    } else {
+      await send();
+    }
+  };
 
   const generate = async () => {
     if (!profile) return router.push('/identity/new');
@@ -61,13 +127,30 @@ export default function TemplateDetail() {
       </View>
       <Title>{tpl.title}</Title>
       <Body muted>{tpl.description}</Body>
-      <Body>{`${t('template.cost', { count: tpl.credit_cost })}${eta ? ` · ${t('template.eta', { eta })}` : ''}`}</Body>
+      <Body>{`${t('template.cost', { count: quote?.credits ?? tpl.est_credits ?? tpl.credit_cost })}${eta ? ` · ${t('template.eta', { eta })}` : ''}`}</Body>
+      {isRemix ? (
+        <View style={{ gap: spacing.sm }}>
+          <Body>{t('remix.slots')}</Body>
+          {tpl.person_slots!.map((s) => {
+            const chosen = profiles.find((p) => p.id === cast[s.slot_id]);
+            return (
+              <Chip key={s.slot_id} active={!!chosen} onPress={() => cycleSlot(s.slot_id)}
+                label={`${s.label}${s.required ? ` (${t('remix.required')})` : ''}: ${chosen ? chosen.name : t('remix.keep')}`} />
+            );
+          })}
+        </View>
+      ) : null}
       {tpl.accepts_text ? (
         <TextInput accessibilityLabel={t('template.addText')} placeholder={t('template.addText')} maxLength={200}
           placeholderTextColor={c.textMuted} value={text} onChangeText={setText}
           style={{ borderWidth: 1, borderColor: c.border, borderRadius: radius.md, padding: spacing.md, color: c.text, minHeight: 50 }} />
       ) : null}
-      <Button title={profile ? t('template.generate') : t('discover.createProfile')} loading={busy} onPress={generate} />
+      {isRemix ? (
+        <Button title={profile ? t('remix.generate', { credits: quote?.credits ?? '…' }) : t('discover.createProfile')}
+          loading={busy} disabled={profile !== null && Object.keys(cast).length === 0} onPress={remix} />
+      ) : (
+        <Button title={profile ? t('template.generate') : t('discover.createProfile')} loading={busy} onPress={generate} />
+      )}
     </ScrollView>
   );
 }

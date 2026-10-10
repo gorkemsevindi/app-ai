@@ -87,11 +87,22 @@ export async function uploadPresigned(
 }
 
 // ---- typed endpoints -------------------------------------------------------------------------
+export type TemplateSlot = { slot_id: string; label: string; required: boolean; thumbnail_url: string | null };
 export type Template = {
   id: string; slug: string; title: string; description: string; category: string;
   thumbnail_url: string | null; preview_url: string | null; duration_s: number; credit_cost: number;
   est_seconds: number; accepts_text: boolean; pro_only: boolean;
+  // V3 (optional so older API responses still type-check)
+  mode?: 'single' | 'remix'; person_slots?: TemplateSlot[]; est_credits?: number | null;
 };
+/** Server-ranked feed card (GET /feed). Ranking weights never reach the client. */
+export type FeedItem = {
+  id: string; slug: string; title: string; category: string; thumbnail_url: string | null;
+  preview_url: string | null; duration_s: number; est_credits: number; person_slots: number; use_count: number;
+  est_seconds: number; pro_only: boolean; safety_badge: string; mode: 'single' | 'remix';
+  creator: { id: string | null; name: string | null };
+};
+export type Estimate = { credits: number; confirm_required: boolean; balance: number; sufficient: boolean; persons: number };
 export type Generation = {
   id: string; kind: string; status: string; progress: number; queue_position: number | null;
   est_seconds_remaining: number | null; credit_cost: number; refunded: boolean; error_code: string | null;
