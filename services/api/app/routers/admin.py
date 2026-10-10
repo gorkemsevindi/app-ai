@@ -310,3 +310,85 @@ def decide(report_id: uuid.UUID, body: ReportDecisionIn, request: Request, admin
     audit(db, admin.id, "report.decision", "report", str(r.id), body.model_dump(), client_ip(request))
     db.commit()
     return {"status": r.status}
+
+
+# ---------------------------------------------------------------- V4 Stage A4: economics, job search, refunds
+
+@router.get("/economics")
+def economics_report(days: int = 7, group: str = "feature", _: User = Depends(staff_user),
+                     db: Session = Depends(get_db)):
+    from ..services import economics
+
+    if group not in ("feature", "model", "template"):
+        raise ApiError(422, "bad_group", "feature, model or template")
+    return economics.report(db, max(1, min(days, 90)), group)
+
+
+@router.get("/jobs")
+def search_jobs(status: str | None = None, user_id: uuid.UUID | None = None, template_id: uuid.UUID | None = None,
+                limit: int = 50, _: User = Depends(staff_user), db: Session = Depends(get_db)):
+    from ..services import economics
+
+    q = select(GenerationJob).order_by(GenerationJob.created_at.desc()).limit(max(1, min(limit, 200)))
+    if status:
+        try:
+            q = q.where(GenerationJob.status == JobStatus(status))
+        except ValueError as e:
+            raise ApiError(422, "bad_status", "unknown status") from e
+    if user_id:
+        q = q.where(GenerationJob.user_id == user_id)
+    if template_id:
+        q = q.where(GenerationJob.template_id == template_id)
+    jobs = db.execute(q).scalars().all()
+    costs = economics._costs(db, [j.id for j in jobs])
+    return {"items": [{**{k: v for k, v in economics.telemetry(db, j, float(costs.get(j.id, 0.0))).items()
+                          if k != "runs"}, "user_id": str(j.user_id), "created_at": j.created_at.isoformat()}
+                      for j in jobs]}
+
+
+@router.get("/jobs/{job_id}")
+def job_lineage(job_id: uuid.UUID, _: User = Depends(staff_user), db: Session = Depends(get_db)):
+    """Cost, state and lineage of one job: attempts, ledger events and output provenance."""
+    from ..models import CreditLedger, GenerationOutput
+    from ..services import economics
+
+    job = db.get(GenerationJob, job_id)
+    if job is None:
+        raise not_found("job")
+    ledger = db.execute(select(CreditLedger).where(CreditLedger.ref_type == "generation_job",
+                                                   CreditLedger.ref_id == str(job.id))
+                        .order_by(CreditLedger.id)).scalars().all()
+    out = db.execute(select(GenerationOutput).where(GenerationOutput.job_id == job.id)).scalar_one_or_none()
+    return {**economics.telemetry(db, job), "user_id": str(job.user_id),
+            "source_video_id": str(job.source_video_id) if job.source_video_id else None,
+            "ledger": [{"reason": e.reason.value, "delta": e.delta, "key": e.idempotency_key, "note": e.note,
+                        "actor_id": str(e.actor_id) if e.actor_id else None, "at": e.created_at.isoformat()}
+                       for e in ledger],
+            "output": {"provenance": out.provenance, "watermarked": out.watermarked,
+                       "deleted": out.deleted_at is not None} if out else None}
+
+
+class ManualRefundIn(BaseModel):
+    reason: str = Field(min_length=5, max_length=200)
+
+
+@router.post("/jobs/{job_id}/refund")
+def manual_refund(job_id: uuid.UUID, body: ManualRefundIn, request: Request, admin: User = Depends(admin_user),
+                  db: Session = Depends(get_db)):
+    """Support refund of a delivered (settled) job, back to the lots it was paid from. Exactly once."""
+    job = db.execute(select(GenerationJob).where(GenerationJob.id == job_id).with_for_update()).scalar_one_or_none()
+    if job is None:
+        raise not_found("job")
+    if job.refunded or job.billing_state == "released":
+        raise ApiError(409, "already_refunded", "this job was already refunded")
+    if job.billing_state != "settled" or not job.credit_cost:
+        raise ApiError(409, "not_refundable", "only delivered, charged jobs can be refunded manually")
+    credits.apply(db, job.user_id, job.credit_cost, LedgerReason.refund, f"admin_refund:{job.id}",
+                  ref_type="generation_job", ref_id=str(job.id), actor_id=admin.id, note=body.reason[:200],
+                  reverse_of=f"gen:{job.id}")
+    job.refunded, job.billing_state = True, "released"
+    audit(db, admin.id, "job.manual_refund", "generation_job", str(job.id),
+          {"credits": job.credit_cost, "reason": body.reason}, ip=client_ip(request))
+    db.commit()
+    return {"id": str(job.id), "refunded": True, "credits": job.credit_cost,
+            "balance": credits.available(db, job.user_id)}
