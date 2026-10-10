@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -60,8 +60,32 @@ class Settings(BaseSettings):
 
     # Billing
     revenuecat_webhook_auth: str | None = None
+    # Apple: root certificates downloaded from https://www.apple.com/certificateauthority/ (DER files);
+    # app_apple_id is required to accept production server notifications.
+    apple_root_cert_paths: list[str] = []
+    apple_app_apple_id: int | None = None
+    apple_online_checks: bool | None = None  # OCSP revocation checks; default on in staging/production
+    # Google Play Developer API service account (JSON key file path, from the secrets manager)
+    google_service_account_file: str | None = None
+    google_rtdn_token: str | None = None  # shared secret in the Pub/Sub push endpoint URL
     apple_bundle_id: str = "com.example.aivideo"
     google_package_name: str = "com.example.aivideo"
+
+    # Sharing / deep links (V4 Stage A3)
+    share_link_secret: str | None = None  # defaults to a key derived from jwt_secret
+    share_base_url: str = "http://localhost:8000"  # public origin serving /t/{token} (universal/app links)
+    app_scheme: str = "aivideo"
+    ios_app_ids: list[str] = []  # "TEAMID.bundle.id" for apple-app-site-association
+    android_sha256_fingerprints: list[str] = []  # signing cert fingerprints for assetlinks.json
+    app_store_url: str | None = None
+    play_store_url: str | None = None
+
+    # AI Studio director / providers. Read from GEMINI_API_KEY (environment secret), never from code.
+    gemini_api_key: str | None = Field(default=None, validation_alias=AliasChoices("GEMINI_API_KEY",
+                                                                                   "APP_GEMINI_API_KEY"))
+
+    # Scheduler: shared secret for POST /internal/cron/{task} (from the secrets manager)
+    cron_token: str | None = None
 
     cors_origins: list[str] = []
     terms_version: str = "2026-10-01"

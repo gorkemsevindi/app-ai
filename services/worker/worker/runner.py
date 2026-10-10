@@ -74,6 +74,15 @@ def process(api: ApiClient, adapters: dict, payload: dict, workdir: Path) -> Non
         if payload.get("kind") in ("analysis", "multi_replace"):
             _process_multiperson(api, adapter, payload, workdir, hb, metrics, t0)
             return
+        if payload.get("kind") in ("studio_shot", "studio_assemble"):
+            _process_studio(api, adapter, payload, workdir, hb, metrics, t0)
+            return
+        if payload.get("kind") == "character_asset":
+            _process_character(api, adapter, payload, workdir, hb, metrics, t0)
+            return
+        if payload.get("kind") == "editor_render":
+            _process_editor(api, payload, workdir, hb, metrics, t0)
+            return
         refs = []
         for i, a in enumerate(payload["identity_assets"]):
             if a["kind"] == "photo":
@@ -147,14 +156,20 @@ def _process_multiperson(api: ApiClient, adapter, payload: dict, workdir: Path, 
         identities[track] = [download(a["url"], workdir / f"id_{track}_{i:02d}.img")
                              for i, a in enumerate(assets) if a["kind"] == "photo"]
     hb.update(0.05, "generating")
-
+    audio_cfg = payload.get("spec", {}).get("audio") or {}
+    custom_audio = download(payload["audio_url"], workdir / "custom_audio.bin") if payload.get("audio_url") else None
+    kw = {"audio": custom_audio} if custom_audio else {}
     out, qa = adapter.run(payload, source, json.loads(tracks_path.read_text()), identities, workdir, hb.update,
-                          hb.cancel)
+                          hb.cancel, **kw)
     if hb.lost.is_set():
         return
     hb.update(0.9, "postprocessing")
     w, h = (int(x) for x in payload["spec"].get("resolution", "720x1280").split("x"))
-    enc = encode_vertical(out, workdir, width=w, height=h, watermark=payload.get("watermark", True), job_id=job_id)
+    # Spec §2.3/§27: keep the original soundtrack unless the user chose licensed custom audio or none.
+    mode = audio_cfg.get("audio_mode", "none")
+    audio_src = custom_audio if mode == "custom" else (source if mode == "original" else None)
+    enc = encode_vertical(out, workdir, width=w, height=h, watermark=payload.get("watermark", True), job_id=job_id,
+                          audio=audio_src)
     report = moderation_report(enc.video)
     upload(payload["upload"]["video"]["url"], enc.video, "video/mp4")
     upload(payload["upload"]["thumbnail"]["url"], enc.thumbnail, "image/jpeg")
@@ -163,6 +178,111 @@ def _process_multiperson(api: ApiClient, adapter, payload: dict, workdir: Path, 
     hb.stop()
     api.complete(job_id, attempt, {"width": enc.width, "height": enc.height, "duration_ms": enc.duration_ms,
                                    "codec": "h264", "qa": qa}, report, metrics)
+
+
+def _process_studio(api: ApiClient, adapter, payload: dict, workdir: Path, hb: Heartbeat, metrics: dict,
+                    t0: float) -> None:
+    from .studio.assemble import assemble
+
+    job_id, attempt, spec = payload["job_id"], payload["attempt"], payload["spec"]
+    w, h = (int(x) for x in spec["resolution"].split("x"))
+    hb.update(0.05, "generating")
+    if payload["kind"] == "studio_shot":
+        refs = {k: [download(u, workdir / f"ref_{k}_{i}.img") for i, u in enumerate(urls)]
+                for k, urls in (payload.get("reference_images") or {}).items()}
+        boundary = download(payload["boundary_video_url"], workdir / "boundary.mp4") \
+            if payload.get("boundary_video_url") else None
+        raw, info = adapter.render(spec, refs, workdir, hb.update, hb.cancel, boundary=boundary)
+        if hb.lost.is_set():
+            return
+        if boundary is not None:  # spec V4 §4: measure transition seam quality
+            from .studio.shots import seam_score
+
+            info["qa"] = {"seam_score": seam_score(boundary, raw, spec["extend"]["direction"])}
+        if spec.get("identity_gate") and refs:  # V6.5: measure each cast member's identity in the shot
+            from .characters.qc import shot_identity
+
+            info.setdefault("qa", {})["identity"] = shot_identity(raw, refs)
+        hb.update(0.9, "postprocessing")
+        # shots are intermediates: no watermark here, it is applied once on the assembled film
+        enc = encode_vertical(raw, workdir, width=w, height=h, watermark=False, job_id=job_id, audio=raw)
+        captions = None
+    else:
+        shots = [(download(s["url"], workdir / f"shot_{i:02d}.mp4") if s.get("url") else None, s)
+                 for i, s in enumerate(payload["shots"])]
+        music = download(payload["music_url"], workdir / "music.bin") if payload.get("music_url") else None
+        hb.update(0.3, "postprocessing")
+        film, captions = assemble(shots, spec, workdir, music)
+        info = {"shots": len(shots), "music": music is not None, "captions": bool(captions)}
+        (workdir / "enc").mkdir()
+        enc = encode_vertical(film, workdir / "enc", width=w, height=h, watermark=payload.get("watermark", True),
+                              job_id=job_id, audio=film)
+    report = moderation_report(enc.video)
+    upload(payload["upload"]["video"]["url"], enc.video, "video/mp4")
+    upload(payload["upload"]["thumbnail"]["url"], enc.thumbnail, "image/jpeg")
+    if captions is not None and payload["upload"].get("captions"):
+        upload(payload["upload"]["captions"]["url"], captions, "text/vtt")
+    elapsed = time.time() - t0
+    metrics.update(gpu_seconds=elapsed, est_cost_usd=round(elapsed / 3600 * GPU_PRICE_PER_HOUR, 5), **info)
+    hb.stop()
+    api.complete(job_id, attempt, {"width": enc.width, "height": enc.height, "duration_ms": enc.duration_ms,
+                                   "codec": "h264"}, report, metrics)
+
+
+def _process_character(api: ApiClient, adapter, payload: dict, workdir: Path, hb: Heartbeat, metrics: dict,
+                       t0: float) -> None:
+    """One character identity image: generate, measure against the master (views), moderate, upload."""
+    import hashlib
+
+    from .characters.qc import compare_view, dhash
+
+    job_id, attempt, spec = payload["job_id"], payload["attempt"], payload["spec"]
+    refs = [download(u, workdir / f"ref_{i}.img") for i, u in enumerate(payload.get("reference_images") or [])]
+    hb.update(0.05, "generating")
+    img_path, info = adapter.generate(spec, refs, workdir, hb.update, hb.cancel)
+    if hb.lost.is_set():
+        return
+    hb.update(0.9, "postprocessing")
+    import cv2
+
+    img = cv2.imread(str(img_path))
+    qc = {"dhash": dhash(img)}
+    if spec["asset_kind"] == "view" and refs:
+        qc.update(compare_view(img_path, refs[0], bool(spec.get("face_meaningful"))))
+    report = moderation_report(img_path)
+    upload(payload["upload"]["image"]["url"], img_path, "image/png")
+    elapsed = time.time() - t0
+    metrics.update(gpu_seconds=elapsed, est_cost_usd=0.0 if info.get("mock") else None, qa={
+        k: v for k, v in qc.items() if isinstance(v, (int, float)) and not isinstance(v, bool)})
+    if metrics["est_cost_usd"] is None:
+        metrics.pop("est_cost_usd")  # priced per image by the API config, not by GPU time
+    hb.stop()
+    api.complete(job_id, attempt, {"sha256": hashlib.sha256(img_path.read_bytes()).hexdigest(),
+                                   "width": int(img.shape[1]), "height": int(img.shape[0]),
+                                   "model": info.get("model"), "mock": bool(info.get("mock")), "qc": qc},
+                 report, metrics)
+
+
+def _process_editor(api: ApiClient, payload: dict, workdir: Path, hb: Heartbeat, metrics: dict, t0: float) -> None:
+    """V8: final render of a canonical project (CPU ffmpeg); originals are only read, never modified."""
+    from .editor.render import render
+
+    job_id, attempt, spec = payload["job_id"], payload["attempt"], payload["spec"]
+    assets = {aid: download(url, workdir / f"asset_{i}") for i, (aid, url) in enumerate(payload["asset_urls"].items())}
+    hb.update(0.1, "generating")
+    out = render(spec["manifest"], assets, spec["format"], spec.get("quality", "720p"), workdir,
+                 watermark=payload.get("watermark", False),
+                 metadata={"comment": f"project {spec['project_id']} revision {spec['revision']}",
+                           "title": spec["manifest"].get("project_id", "")})
+    if hb.lost.is_set():
+        return
+    hb.update(0.9, "postprocessing")
+    report = moderation_report(out)
+    upload(payload["upload"]["output"]["url"], out, payload["upload"]["output"]["mime"])
+    elapsed = time.time() - t0
+    metrics.update(gpu_seconds=0.0, cpu_seconds=round(elapsed, 2), est_cost_usd=0.0, renderer="ffmpeg")
+    hb.stop()
+    api.complete(job_id, attempt, {"bytes": out.stat().st_size, "format": spec["format"]}, report, metrics)
 
 
 def _safe_fail(api, job_id, attempt, code, msg, retryable, metrics) -> None:

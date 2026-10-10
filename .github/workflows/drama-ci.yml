@@ -1,0 +1,36 @@
+name: drama-ci
+on:
+  push:
+    paths: ["drama/**", ".github/workflows/drama-ci.yml"]
+  pull_request:
+    paths: ["drama/**", ".github/workflows/drama-ci.yml"]
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env: {POSTGRES_USER: drama, POSTGRES_PASSWORD: drama, POSTGRES_DB: drama_test}
+        ports: ["5432:5432"]
+        options: --health-cmd pg_isready --health-interval 5s --health-retries 10
+    defaults: {run: {working-directory: drama/backend}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg espeak-ng fonts-dejavu-core
+      - run: pip install -e ".[dev,anthropic,google]"
+      - run: ruff check .
+      - run: DRAMA_DATABASE_URL=postgresql+psycopg://drama:drama@localhost:5432/drama_test alembic upgrade head && alembic check
+      - run: python -m pytest -q
+        env: {TEST_DATABASE_URL: "postgresql+psycopg://drama:drama@localhost:5432/drama_test"}
+  web:
+    runs-on: ubuntu-latest
+    defaults: {run: {working-directory: drama/web}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: "22"}
+      - run: npm ci
+      - run: npm run typecheck
+      - run: NEXT_TELEMETRY_DISABLED=1 npm run build

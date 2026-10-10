@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+*.db
+var/
+.env
+node_modules/
+.next/
+.expo/
+*.tsbuildinfo

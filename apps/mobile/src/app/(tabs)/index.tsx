@@ -5,12 +5,19 @@ import { FlatList, RefreshControl, ScrollView, View } from 'react-native';
 
 import { TemplateCard } from '@/components/TemplateCard';
 import { Body, Button, Chip } from '@/components/ui';
-import { api, type Profile, type Template } from '@/lib/api';
+import { api, type FeedItem, type Profile, type Template } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import i18n from '@/lib/i18n';
 import { spacing, useColors } from '@/lib/theme';
 
-const CATEGORIES = ['trending', 'new', 'funny', 'cinematic', 'dance', 'fashion', 'travel', 'fantasy'];
+const CATEGORIES = ['trending', 'new', 'multi_person', 'funny', 'cinematic', 'dance', 'fashion', 'travel', 'fantasy'];
+
+/** Feed cards reuse TemplateCard: the server-quoted starting price replaces the legacy flat cost. */
+const toTemplate = (f: FeedItem): Template & { person_count: number } => ({
+  id: f.id, slug: f.slug, title: f.title, description: '', category: f.category, thumbnail_url: f.thumbnail_url,
+  preview_url: f.preview_url, duration_s: f.duration_s, credit_cost: f.est_credits, est_seconds: f.est_seconds,
+  accepts_text: false, pro_only: f.pro_only, mode: f.mode, est_credits: f.est_credits, person_count: f.person_slots,
+});
 
 export default function Discover() {
   const { t } = useTranslation();
@@ -25,11 +32,11 @@ export default function Discover() {
     setLoading(true);
     try {
       const q = cat === 'trending' ? '' : `&category=${cat}`;
-      const [tpls, profiles] = await Promise.all([
-        api<Template[]>(`/templates?locale=${i18n.language}${q}`),
+      const [feed, profiles] = await Promise.all([
+        api<{ items: FeedItem[] }>(`/feed?locale=${i18n.language}${q}`),
         api<Profile[]>('/identity-profiles'),
       ]);
-      setItems(tpls);
+      setItems(feed.items.map(toTemplate));
       setHasProfile(profiles.some((p) => p.status === 'ready'));
       refreshMe();
     } finally {

@@ -26,6 +26,17 @@ export default function RootLayout() {
             <Stack.Screen name="identity/new" options={{ title: t('identity.title'), presentation: 'modal' }} />
             <Stack.Screen name="multi/[videoId]" options={{ title: t('multi.title') }} />
             <Stack.Screen name="paywall" options={{ title: '', presentation: 'modal' }} />
+            <Stack.Screen name="t/[token]" options={{ title: '' }} />
+            <Stack.Screen name="studio/[id]" options={{ title: t('studio.title') }} />
+            <Stack.Screen name="creator" options={{ title: t('creator.title') }} />
+            <Stack.Screen name="characters/index" options={{ title: t('character.title') }} />
+            <Stack.Screen name="characters/[id]" options={{ title: t('character.title') }} />
+            <Stack.Screen name="productions/new" options={{ title: '' }} />
+            <Stack.Screen name="productions/[id]" options={{ title: t('production.title') }} />
+            <Stack.Screen name="productions/dialogue" options={{ title: t('dialogue.title') }} />
+            <Stack.Screen name="productions/life" options={{ title: '' }} />
+            <Stack.Screen name="editor/index" options={{ title: t('editor.title') }} />
+            <Stack.Screen name="editor/[id]" options={{ title: t('editor.title') }} />
           </Stack>
         </AuthProvider>
       </ThemeProvider>

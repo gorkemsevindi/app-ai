@@ -58,6 +58,36 @@ def delete_user_data(db: Session, user: User, actor_id=None, ip: str | None = No
                .values(status=ProfileStatus.deleted, deleted_at=now, quality_report={}, name="deleted"))
     db.execute(update(SourceVideo).where(SourceVideo.user_id == user.id)
                .values(status=SourceVideoStatus.deleted, deleted_at=now, analysis={}))
+    from ..models import AudioAsset, ConsentReceipt, ShareLink, StudioCharacter, StudioProject
+    db.execute(update(AudioAsset).where(AudioAsset.user_id == user.id).values(status="deleted", deleted_at=now))
+    db.execute(update(ShareLink).where(ShareLink.owner_id == user.id, ShareLink.revoked_at.is_(None))
+               .values(revoked_at=now))
+    db.execute(update(ConsentReceipt).where(ConsentReceipt.user_id == user.id, ConsentReceipt.revoked_at.is_(None))
+               .values(revoked_at=now))
+    db.execute(update(StudioCharacter).where(StudioCharacter.user_id == user.id)
+               .values(deleted_at=now, identity_profile_id=None, description="", traits={}))
+    db.execute(update(StudioProject).where(StudioProject.user_id == user.id).values(deleted_at=now))
+    from ..models import EditorAsset, EditorProject
+
+    removed += get_storage().delete_prefix(f"editor/{user.id}/")
+    db.execute(update(EditorAsset).where(EditorAsset.owner_id == user.id).values(status="deleted", deleted_at=now))
+    db.execute(update(EditorProject).where(EditorProject.owner_id == user.id).values(deleted_at=now))
+    from ..models import Character, CharacterAsset
+    from ..services import character_market
+
+    st = get_storage()
+    for ch in db.execute(select(Character).where(Character.creator_id == user.id,
+                                                 Character.deleted_at.is_(None))).scalars():
+        character_market.takedown(db, user, ch, "creator account deleted")  # grants end; renders retained
+        ch.status, ch.deleted_at = "deleted", now
+        for a in db.execute(select(CharacterAsset).where(CharacterAsset.character_id == ch.id)).scalars():
+            if a.storage_key:
+                st.delete(a.storage_key)
+                removed += 1
+                a.storage_key = None
+    from ..services import learning
+
+    learning.delete_learning_data(db, user, source="account_deletion")
     job_ids = select(GenerationJob.id).where(GenerationJob.user_id == user.id)
     db.execute(update(GenerationOutput).where(GenerationOutput.job_id.in_(job_ids)).values(deleted_at=now))
     db.execute(update(GenerationJob).where(GenerationJob.user_id == user.id).values(user_text=None))

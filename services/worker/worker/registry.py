@@ -7,7 +7,27 @@ import os
 
 from .adapters import command
 from .adapters.mock import MockAdapter
+from .characters.images import GeminiImage, MockImage
 from .multiperson import adapters as mp
+from .studio.shots import MockT2V, VeoShot
+
+
+class StudioAssembler:
+    """CPU-only assembly of AI Studio projects (ffmpeg)."""
+
+    name = "studio_assembler"
+
+    def healthcheck(self) -> dict:
+        return {"ok": True, "gpu": False}
+
+class EditorRenderer:
+    """CPU-only final renders of V8 editor projects (ffmpeg)."""
+
+    name = "editor_renderer"
+
+    def healthcheck(self) -> dict:
+        return {"ok": True, "gpu": False}
+
 
 FACTORIES = {
     "mock": MockAdapter,
@@ -20,6 +40,15 @@ FACTORIES = {
     "wan22_animate_mp": mp.wan22_animate_mp,
     "mock_mp_analyzer": mp.mock_mp_analyzer,
     "mock_mp": mp.mock_mp,
+    # AI Studio
+    "mock_t2v": MockT2V,
+    "veo": VeoShot,
+    "studio_assembler": StudioAssembler,
+    # V8 editor exports (CPU ffmpeg)
+    "editor_renderer": EditorRenderer,
+    # V6 character identity images
+    "mock_image": MockImage,
+    "gemini_image": GeminiImage,
 }
 
 

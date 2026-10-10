@@ -5,6 +5,9 @@
     "paths": {
       "@/*": [
         "./src/*"
+      ],
+      "@shared/*": [
+        "../../packages/shared/src/*"
       ]
     },
     "allowImportingTsExtensions": true,
@@ -12,6 +15,7 @@
   },
   "include": [
     "**/*.ts",
-    "**/*.tsx"
+    "**/*.tsx",
+    "../../packages/shared/src/**/*.ts"
   ]
 }

@@ -1,5 +1,7 @@
 {
-  "app": { "tagline": "Put yourself in what's trending." },
+  "app": {
+    "tagline": "Put yourself in what's trending."
+  },
   "onboarding": {
     "headline": "Star in today's trends",
     "sub": "Add a few selfies once. Then tap any template and get a vertical video of you in about a minute.",
@@ -11,43 +13,124 @@
     "continue": "Get started"
   },
   "auth": {
-    "email": "Email", "password": "Password (min. 8 characters)", "signUp": "Create account", "signIn": "Sign in",
-    "haveAccount": "I already have an account", "noAccount": "Create a new account",
-    "apple": "Continue with Apple", "google": "Continue with Google"
+    "email": "Email",
+    "password": "Password (min. 8 characters)",
+    "signUp": "Create account",
+    "signIn": "Sign in",
+    "haveAccount": "I already have an account",
+    "noAccount": "Create a new account",
+    "apple": "Continue with Apple",
+    "google": "Continue with Google"
   },
-  "tabs": { "discover": "Discover", "video": "Your video", "library": "My videos", "profile": "Profile" },
-  "discover": { "credits": "{{count}} credits", "createProfile": "Create your face profile to start", "empty": "No templates here yet." },
-  "categories": { "trending": "Trending", "new": "New", "funny": "Funny", "cinematic": "Cinematic", "dance": "Dance", "fashion": "Fashion", "travel": "Travel", "fantasy": "Fantasy" },
-  "template": { "cost": "{{count}} credits", "eta": "about {{eta}}", "addText": "Add a short caption (optional)", "generate": "Create my video", "pro": "Pro" },
+  "tabs": {
+    "discover": "Discover",
+    "video": "Your video",
+    "library": "My videos",
+    "profile": "Profile",
+    "studio": "Studio"
+  },
+  "discover": {
+    "credits": "{{count}} credits",
+    "createProfile": "Create your face profile to start",
+    "empty": "No templates here yet."
+  },
+  "categories": {
+    "trending": "Trending",
+    "new": "New",
+    "funny": "Funny",
+    "cinematic": "Cinematic",
+    "dance": "Dance",
+    "fashion": "Fashion",
+    "travel": "Travel",
+    "fantasy": "Fantasy",
+    "multi_person": "Multi-person"
+  },
+  "template": {
+    "cost": "{{count}} credits",
+    "eta": "about {{eta}}",
+    "addText": "Add a short caption (optional)",
+    "generate": "Create my video",
+    "pro": "Pro"
+  },
   "identity": {
     "title": "Your face profile",
     "explain": "Pick 5–10 clear photos of yourself: different angles, good light, only you in the frame.",
     "consent": "These photos show me, or I have the explicit permission of the person shown.",
-    "pick": "Choose photos", "uploading": "Uploading {{done}}/{{total}}", "ready": "Profile ready!",
-    "needMore": "Add {{count}} more photos", "delete": "Delete profile and photos"
+    "pick": "Choose photos",
+    "uploading": "Uploading {{done}}/{{total}}",
+    "ready": "Profile ready!",
+    "needMore": "Add {{count}} more photos",
+    "delete": "Delete profile and photos"
   },
   "job": {
     "title": "Your video",
-    "stage": { "queued": "In line", "preparing": "Preparing your photos", "generating": "Creating your video", "finishing": "Final touches", "completed": "Done!", "failed": "Something went wrong", "cancelled": "Cancelled" },
-    "position": "#{{n}} in line", "eta": "About {{eta}} left", "notifyHint": "You can leave this screen — we'll keep working on it.",
-    "cancel": "Cancel", "retry": "Try again", "refunded": "Your credits were refunded.",
-    "download": "Save to Photos", "share": "Share", "report": "Report", "regenerate": "Make another",
-    "reported": "Thanks — our team will review it.", "aiLabel": "AI-generated"
+    "stage": {
+      "queued": "In line",
+      "preparing": "Preparing your photos",
+      "generating": "Creating your video",
+      "finishing": "Final touches",
+      "completed": "Done!",
+      "failed": "Something went wrong",
+      "cancelled": "Cancelled"
+    },
+    "position": "#{{n}} in line",
+    "eta": "About {{eta}} left",
+    "notifyHint": "You can leave this screen — we'll keep working on it.",
+    "cancel": "Cancel",
+    "retry": "Try again",
+    "refunded": "Your credits were refunded.",
+    "download": "Save to Photos",
+    "share": "Share",
+    "report": "Report",
+    "regenerate": "Make another",
+    "reported": "Thanks — our team will review it.",
+    "aiLabel": "AI-generated",
+    "rate": "Rate this video (optional)"
   },
-  "report": { "title": "What's wrong?", "sexual": "Sexual content", "minor_safety": "Involves a minor", "impersonation": "Impersonation / fake", "harassment": "Harassment", "violence": "Violence", "copyright": "Copyright", "low_quality": "Low quality", "other": "Other" },
+  "report": {
+    "title": "What's wrong?",
+    "sexual": "Sexual content",
+    "minor_safety": "Involves a minor",
+    "impersonation": "Impersonation / fake",
+    "harassment": "Harassment",
+    "violence": "Violence",
+    "copyright": "Copyright",
+    "low_quality": "Low quality",
+    "other": "Other",
+    "template": "Report template"
+  },
   "multi": {
     "title": "Your video, new faces",
     "intro": "Upload a clip you own. We'll find up to {{max}} people so you can choose who to replace with your face profiles.",
     "rights": "I own this video or have the rights to use it.",
     "consent": "Everyone whose face will be replaced has agreed to it.",
-    "pick": "Choose a video ({{min}}–{{max}} s)", "analyzing": "Finding people in your video…",
-    "people": "Who should be replaced?", "assign": "Choose a face profile", "keep": "Keep original",
+    "pick": "Choose a video ({{min}}–{{max}} s)",
+    "analyzing": "Finding people in your video…",
+    "people": "Who should be replaced?",
+    "assign": "Choose a face profile",
+    "keep": "Keep original",
     "notSelectable": "Can't replace (face too small or not visible)",
-    "preview": "Quick preview ({{credits}} credits)", "generate": "Create video ({{credits}} credits)",
-    "rejected": "We can't use this video", "disabled": "Coming soon in your region."
+    "preview": "Quick preview ({{credits}} credits)",
+    "generate": "Create video ({{credits}} credits)",
+    "rejected": "We can't use this video",
+    "disabled": "Coming soon in your region."
   },
-  "profile": { "credits": "Credits", "plan": "Plan", "faceProfiles": "Face profiles", "newProfile": "New face profile", "language": "Language", "signOut": "Sign out", "deleteAccount": "Delete account", "deleteConfirm": "This permanently deletes your account, face profiles and videos. This can't be undone.", "deleteDone": "Your account was deleted." },
-  "paywall": { "title": "Get more credits", "sub": "Pro: monthly credits, priority queue, no watermark.", "comingSoon": "In-app purchases are being set up." },
+  "profile": {
+    "credits": "Credits",
+    "plan": "Plan",
+    "faceProfiles": "Face profiles",
+    "newProfile": "New face profile",
+    "language": "Language",
+    "signOut": "Sign out",
+    "deleteAccount": "Delete account",
+    "deleteConfirm": "This permanently deletes your account, face profiles and videos. This can't be undone.",
+    "deleteDone": "Your account was deleted."
+  },
+  "paywall": {
+    "title": "Get more credits",
+    "sub": "Pro: monthly credits, priority queue, no watermark.",
+    "comingSoon": "In-app purchases are being set up."
+  },
   "errors": {
     "generic": "Something went wrong. Please try again.",
     "insufficient_credits": "You don't have enough credits for this.",
@@ -64,6 +147,428 @@
     "person_not_selectable": "That person can't be replaced in this video.",
     "too_many_persons": "You picked too many people.",
     "file_too_large": "That file is too large.",
-    "unsupported_media_type": "That file type isn't supported."
+    "unsupported_media_type": "That file type isn't supported.",
+    "slots_missing": "Fill the required roles.",
+    "template_unavailable": "This template is being updated, try again soon.",
+    "confirmation_required": "Confirm the price before continuing.",
+    "speaker_mapping_required": "It's unclear who is speaking or singing in this video. Turn lip-sync off and try again.",
+    "cost_ceiling_exceeded": "This combination can't be rendered right now. Try fewer people or no lip-sync.",
+    "requote_required": "Pricing for this video is being updated. Try again shortly.",
+    "audio_analysis_missing": "This video has no audio analysis, so lip-sync isn't available.",
+    "not_shareable": "Only finished template videos can be shared.",
+    "purchase_other_account": "This purchase belongs to another account.",
+    "billing_not_configured": "Purchases are not available right now.",
+    "invalid_receipt": "We couldn't verify this purchase.",
+    "capability_unsupported": "The selected video provider can't render this storyboard.",
+    "pricing_not_configured": "This provider has no price configured.",
+    "project_budget_exceeded": "This exceeds the project budget.",
+    "director_not_configured": "The AI director isn't configured yet.",
+    "director_invalid_output": "Couldn't create a plan, please try again.",
+    "bad_storyboard": "The storyboard is invalid.",
+    "too_many_shots": "Too many shots.",
+    "too_long": "The video is too long.",
+    "bad_duration": "Unsupported shot duration.",
+    "source_not_rendered": "Render this shot first.",
+    "stale_edit": "The project changed; preview the edit again.",
+    "nothing_to_undo": "Nothing to undo.",
+    "unknown_shot": "There is no such shot.",
+    "bad_edit": "This edit isn't possible.",
+    "editor_invalid_output": "Couldn't understand the edit, please try again.",
+    "editor_not_configured": "The AI editor isn't configured yet.",
+    "creator_required": "Create a creator profile first.",
+    "handle_taken": "This handle is taken.",
+    "terms_required": "Accept the creator terms.",
+    "license_invalid": "This actor licence can't be used.",
+    "license_terms_violation": "This use breaks the licensed actor's terms.",
+    "territory_not_licensed": "This actor isn't licensed in your country.",
+    "minor_not_allowed": "Characters must be adults.",
+    "impersonation_not_allowed": "Describe an original character, not a real or famous person.",
+    "rights_conflict": "This names a protected person or work.",
+    "rights_declaration_required": "Please confirm the rights declaration.",
+    "license_required": "This character needs a licence first.",
+    "cast_resolution_required": "Cast or pick the mentioned characters first.",
+    "identity_not_locked": "Lock the character identity first.",
+    "creator_review_required": "Approve every view before locking.",
+    "identity_validation_failed": "Fix failed or missing views before locking.",
+    "voice_cloning_disabled": "Voice cloning is not available.",
+    "cast_unavailable": "A cast character can't be used right now.",
+    "immutable_trait_change": "These traits define the identity: create a major version.",
+    "budget_approval_required": "Approve a budget before paid production work.",
+    "budget_cap_exceeded": "This would exceed the approved budget.",
+    "continuity_errors": "Fix the continuity errors first.",
+    "dialogue_locked": "This line is locked; unlock it first.",
+    "episode_locked": "This episode is approved: branch the story instead.",
+    "adults_only": "Mature productions are for adults."
+  },
+  "remix": {
+    "slots": "Who stars in it?",
+    "pick": "Pick a face profile",
+    "keep": "Keep original",
+    "required": "required",
+    "generate": "Create video ({{credits}} credits)",
+    "confirm": "This video costs {{credits}} credits. Continue?",
+    "people": "{{count}} people",
+    "uses": "{{count}} uses",
+    "official": "Official",
+    "lipSync": "Lip-sync to the music",
+    "on": "On",
+    "off": "Off"
+  },
+  "share": {
+    "link": "Share template link",
+    "message": "Try this template with your own face:",
+    "unavailable": "This template is no longer available.",
+    "browse": "Browse templates"
+  },
+  "studio": {
+    "title": "AI Studio",
+    "subtitle": "Write your story; we plan the shots, show the price, and render after you confirm.",
+    "comingSoon": "AI Studio is coming soon.",
+    "briefLabel": "Story",
+    "briefPlaceholder": "E.g. A dancer wakes up in Istanbul at dawn, runs across the Galata bridge and dances on a rooftop at sunrise.",
+    "plan": "Create storyboard (free)",
+    "render": "Render ({{credits}} credits)",
+    "confirm": "This will use {{credits}} credits",
+    "confirmDetail": "{{n}} new shots will be rendered, {{r}} reused.",
+    "estimate": "Estimate: {{credits}} credits · {{n}} new, {{r}} ready shots · balance {{balance}}",
+    "status": {
+      "draft": "Draft",
+      "planned": "Planned",
+      "rendering": "Rendering",
+      "ready": "Ready",
+      "failed": "Some shots failed"
+    },
+    "shot": {
+      "new": "new",
+      "queued": "queued",
+      "ready": "ready",
+      "failed": "failed"
+    },
+    "edit": {
+      "title": "Edit (chat)",
+      "placeholder": "E.g. extend shot 2 by 4 seconds, remove shot 3, make it 16:9",
+      "preview": "Preview",
+      "apply": "Apply",
+      "reject": "Discard",
+      "undo": "Undo",
+      "duplicate": "Duplicate",
+      "remove": "Remove",
+      "extend": "+4 s",
+      "summary": "{{added}} added, {{removed}} removed, {{changed}} changed shots · new rendering: {{credits}} credits"
+    },
+    "mode": {
+      "faithful": "Faithful",
+      "balanced": "Balanced",
+      "experimental": "Experimental"
+    },
+    "modeHint": {
+      "faithful": "Sticks to what you wrote and adds nothing.",
+      "balanced": "Keeps your text and adds lighting and camera suggestions.",
+      "experimental": "Bolder visual ideas; your story stays the same."
+    },
+    "variations": "Make variations (2)",
+    "variationsReady": "New versions ready: {{versions}}. Pick one from the versions list."
+  },
+  "creator": {
+    "title": "Creator",
+    "comingSoon": "The creator program is coming soon.",
+    "join": "Publish templates and earn when they're used.",
+    "handle": "Handle",
+    "name": "Display name",
+    "terms": "I accept the creator terms",
+    "joinCta": "Become a creator",
+    "balance": "Balance: {{v}}",
+    "available": "Payable: {{v}}",
+    "pending": "In hold period: {{v}}",
+    "paid": "Paid out: {{v}}",
+    "payout": {
+      "none": "No payout account",
+      "kyc_pending": "Identity check pending",
+      "verified": "Payout account verified",
+      "blocked": "Payouts blocked"
+    },
+    "review": {
+      "pending": "Draft",
+      "review": "In review",
+      "approved": "Live",
+      "rejected": "Rejected"
+    }
+  },
+  "learning": {
+    "title": "Learning settings",
+    "technical_improvement": "Technical improvement (no content stored)",
+    "content_training": "Train models with my content",
+    "personalization": "Personalization",
+    "on": "On",
+    "off": "Off",
+    "note": "Your videos and prompts are never shared with other users. Technical improvement only uses timing, success and quality numbers.",
+    "delete": "Delete my learning data",
+    "deleted": "Your learning data was deleted."
+  },
+  "character": {
+    "title": "Characters",
+    "comingSoon": "Character creation is coming soon.",
+    "create": "Create an original digital actor",
+    "name": "Display name",
+    "handle": "Handle (e.g. mert)",
+    "description": "Description",
+    "descriptionHint": "Describe an original, adult, fictional character: face, hair, style, personality, voice.",
+    "aesthetic": {
+      "photorealistic": "Photorealistic",
+      "stylized": "Stylized",
+      "animation": "Animation"
+    },
+    "age": {
+      "young_adult": "Young adult",
+      "adult": "Adult",
+      "middle_aged": "Middle-aged",
+      "senior": "Senior"
+    },
+    "rights": "This character is my original creation, an adult, not based on a real person and free of third-party IP. I accept the character terms.",
+    "createCta": "Create character",
+    "lockedBadge": "identity locked",
+    "status": {
+      "draft": "Draft",
+      "private": "Private",
+      "unlisted": "Unlisted",
+      "public": "Public",
+      "suspended": "Suspended",
+      "deleted": "Deleted"
+    },
+    "version": {
+      "draft": "choose a master identity",
+      "master_approved": "master approved",
+      "built": "review the identity sheet",
+      "locked": "locked",
+      "superseded": "superseded"
+    },
+    "asset": {
+      "pending": "generating",
+      "ready": "ready",
+      "approved": "approved",
+      "rejected": "rejected",
+      "failed": "failed"
+    },
+    "lockedAs": "Locked identity: v{{v}}. Cast it in AI Studio with @handle.",
+    "previewsHint": "Generate seed previews and pick the master identity. Reroll as often as you like before approving.",
+    "previews": "Generate previews",
+    "reroll": "Reroll previews",
+    "approveMaster": "Use this as the master identity?",
+    "build": "Build multi-angle identity sheet",
+    "sheet": "Identity sheet (approve or reject each view)",
+    "notFaceView": "face match not meaningful here",
+    "confirm": "{{credits}} credits for {{n}} images",
+    "report": "Validation: {{verdict}} ({{method}})",
+    "verified": "Face-embedding check passed and every view approved.",
+    "measuredOnly": "Measured, not guaranteed: proxy metrics only or views not yet approved.",
+    "failedViews": "Needs repair: {{v}}",
+    "repair": "Regenerate rejected / failed views",
+    "lock": "Lock identity",
+    "verdict": {
+      "pass": "pass",
+      "warn": "needs review",
+      "fail": "failed",
+      "insufficient": "not measurable"
+    }
+  },
+  "cast": {
+    "title": "Cast",
+    "mention": "Character mention",
+    "add": "Add to cast",
+    "licensed": "licensed",
+    "lock": {
+      "standard": "Standard",
+      "strong": "Strong",
+      "strict": "Strict"
+    },
+    "lockHint": {
+      "standard": "Best effort: identity is measured and reported.",
+      "strong": "More identity conditioning and checks (higher price).",
+      "strict": "Shots below the identity threshold are retried a few times (failed attempts refunded), then fail clearly."
+    },
+    "resolution": {
+      "ambiguous": "Several characters match: pick one.",
+      "not_found": "No character found.",
+      "needs_cast": "Add this character to the cast.",
+      "bound": "Already in the cast."
+    }
+  },
+  "production": {
+    "title": "Production",
+    "question": "Which story do you want to tell?",
+    "slogan": "YOUR STORY. YOUR STARS. YOUR CINEMA.",
+    "entry": {
+      "series": "Create Your Own Series",
+      "film": "Make Your Own Movie",
+      "stars": "Create Your Own Stars",
+      "life_story": "Your Life. Your Story."
+    },
+    "titleLabel": "Title",
+    "logline": "Logline (one or two sentences)",
+    "format": "Format",
+    "episodes": "Episodes",
+    "minutes": "Minutes per episode",
+    "lengthHint": "Long episodes are made of many short shots; 30 minutes is not one generation.",
+    "formats": {
+      "micro": "Micro drama (30 s–2 min)",
+      "short_series": "Short series (2–5 min)",
+      "standard_episode": "Episode (5–10 min)",
+      "long_episode": "Long episode (10–30 min)",
+      "short_film": "Short film (5–30 min)",
+      "feature": "Feature (30+ min, in parts)"
+    },
+    "style": "Visual style",
+    "styles": {
+      "photoreal": "Photoreal",
+      "cinematic": "Cinematic",
+      "cartoon_2d": "2D cartoon",
+      "animation_3d": "3D animation",
+      "anime": "Anime",
+      "stylized": "Stylized",
+      "mixed": "Mixed"
+    },
+    "rating": "Age rating",
+    "ratings": {
+      "general": "General",
+      "teen": "Teen",
+      "mature": "Mature (18+)"
+    },
+    "ratingHint": {
+      "general": "No swearing; fictional conflict is fine.",
+      "teen": "Slang and swearing allowed in fiction.",
+      "mature": "Adult fictional dialogue. Some content is never allowed, at any rating."
+    },
+    "profile": "Budget profile",
+    "profiles": {
+      "economy": "Economy",
+      "standard": "Standard",
+      "cinema_pro": "Cinema Pro"
+    },
+    "create": "Create production",
+    "status": {
+      "draft": "Draft",
+      "planned": "Planned",
+      "queued": "Queued",
+      "generating": "Generating",
+      "qc": "Quality checks",
+      "assembling": "Assembling",
+      "pilot_rendering": "Pilot rendering",
+      "pilot_ready": "Pilot ready",
+      "ready": "Ready",
+      "failed": "Failed",
+      "partial_failed": "Some shots failed (re-render charges only those)",
+      "cancelled": "Cancelled"
+    },
+    "script": "Screenplay",
+    "scriptHint": "INT. KITCHEN - NIGHT / CHARACTER / (whispering) / the line…",
+    "plan": "Plan this episode (free)",
+    "animatic": "Free storyboard preview",
+    "dialogue": "Dialogue editor",
+    "budget": "Budget",
+    "budgetUsd": "Budget limit (USD, optional)",
+    "estimate": "Estimate",
+    "estimateRange": "{{lo}}–{{hi}} credits",
+    "infeasible": "This budget can't make this production at this quality. Options:",
+    "alt": {
+      "reduce_duration": "Shorter",
+      "economy_profile": "Economy profile",
+      "less_action": "Less action",
+      "episode_by_episode": "Episode by episode",
+      "animatic_and_pilot": "Animatic + pilot first",
+      "increase_budget": "Increase the budget"
+    },
+    "approve": "Approve budget (hard cap)",
+    "capInfo": "Cap {{cap}} credits · used {{used}}",
+    "confirm": "Confirm {{credits}} credits",
+    "pilot": "Render 30–60 s pilot",
+    "render": "Render the episode",
+    "cancel": "Cancel (refund unfinished work)"
+  },
+  "dialogue": {
+    "title": "Dialogue",
+    "exactHint": "Exact mode: your words are kept exactly (no smoothing). Voice/lip-sync are not available yet; lines play as subtitles.",
+    "redo": "Redo",
+    "exact": "exact",
+    "text": "Line",
+    "preview": "Preview impact",
+    "lock": "Lock line",
+    "unlock": "Unlock line",
+    "impact": "Affects: {{levels}} · {{credits}} credits",
+    "level": {
+      "subtitles": "subtitles",
+      "voice": "voice",
+      "voice_not_available": "voice (not available)",
+      "voice_and_lip_sync": "voice + lip-sync",
+      "lip_sync_not_available": "lip-sync (not available)",
+      "shot_regeneration": "shot regeneration",
+      "story_review": "story review"
+    },
+    "delivery": {
+      "normal": "Normal",
+      "shout": "Shout",
+      "whisper": "Whisper",
+      "cry": "Crying",
+      "sarcastic": "Sarcastic",
+      "angry": "Angry",
+      "calm": "Calm"
+    }
+  },
+  "life": {
+    "private": "Private by default. Nothing is shared unless you choose to.",
+    "q": {
+      "childhood": "Where and how did you grow up?",
+      "turning_points": "Which moments changed your life?",
+      "people": "Who were the important people?",
+      "places": "Which places matter?",
+      "feelings": "What did you feel?",
+      "ending": "How should the story end?"
+    },
+    "draft": "Create the timeline + privacy check",
+    "people": "People named: {{names}}",
+    "confirm": "I reviewed the privacy check; real people are anonymised or agreed.",
+    "approve": "Create my story"
+  },
+  "editor": {
+    "title": "Editor",
+    "subtitle": "Edit the project you started on the web; same project file, same commands.",
+    "new": "New project",
+    "video": "Video",
+    "photo": "Design",
+    "empty": "No projects yet.",
+    "disabled": "The editor isn’t available on this account yet.",
+    "saved": "Saved",
+    "pending": "Unsaved…",
+    "saving": "Saving…",
+    "offline": "Offline — kept on this device",
+    "conflict": "Conflict: {{count}} edits could not be applied",
+    "error": "The server rejected the edit",
+    "addText": "Text",
+    "addMedia": "Media",
+    "addShape": "Shape",
+    "split": "Split",
+    "delete": "Delete",
+    "undo": "Undo",
+    "redo": "Redo",
+    "trimStart": "Start +0.5 s",
+    "trimEnd": "End −0.5 s",
+    "extend": "End +0.5 s",
+    "moveLeft": "◀ 0.5 s",
+    "moveRight": "0.5 s ▶",
+    "editText": "Edit text",
+    "apply": "Apply",
+    "export": "Export",
+    "quote": "This export costs {{credits}} credits. Start it?",
+    "start": "Start",
+    "cancel": "Cancel",
+    "exports": "Exports",
+    "open": "Open",
+    "previewNote": "The mobile preview is approximate; the final picture is rendered on the server from the same manifest.",
+    "uploading": "Uploading…",
+    "dismiss": "OK",
+    "play": "Play",
+    "pause": "Pause",
+    "layers": "Layers",
+    "newText": "New text",
+    "invalid": "This edit could not be applied ({{code}})."
   }
 }

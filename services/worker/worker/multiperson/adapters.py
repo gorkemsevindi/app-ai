@@ -42,9 +42,20 @@ class AnalysisAdapter:
         det, faces, _ = self._load()
         safety = self._sf()  # re-evaluated each job: fails closed in production if unconfigured
         spec = payload.get("spec", {})
-        return analyze(source, det, faces, safety, workdir, progress, cancel,
-                       max_seconds=float(spec.get("max_duration_s", 15)) + 5,
-                       min_face_px=int(spec.get("min_face_px", 64)))
+        res = analyze(source, det, faces, safety, workdir, progress, cancel,
+                      max_seconds=float(spec.get("max_duration_s", 15)) + 5,
+                      min_face_px=int(spec.get("min_face_px", 64)))
+        if spec.get("audio_analysis"):
+            # Speaker timeline for lip-sync (spec §27): suggestions + confidence, never a silent decision.
+            from ..audio.providers import separation_from_env
+            from ..audio.stage import analyze_audio
+            from .pipeline import probe
+
+            info = probe(source)
+            n = int(min(info.n_frames, (float(spec.get("max_duration_s", 15)) + 5.5) * info.fps))
+            res["audio"] = analyze_audio(source, load_tracks(Path(res["_tracks_path"])), n, info.fps, workdir,
+                                         separation_from_env())
+        return res
 
     def cancel(self) -> None:
         pass
@@ -70,7 +81,7 @@ class MultiReplaceAdapter:
             return {"ok": False, "error": repr(e)}
 
     def run(self, payload: dict, source: Path, tracks: dict, identities: dict[str, list[Path]], workdir: Path,
-            progress, cancel: threading.Event) -> tuple[Path, dict]:
+            progress, cancel: threading.Event, audio: Path | None = None) -> tuple[Path, dict]:
         spec = payload["spec"]
         w, h = (int(x) for x in spec.get("resolution", "720x1280").split("x"))
         model_res = (480, 832) if (spec.get("preview") or w <= 480) else (w, h)
@@ -79,8 +90,25 @@ class MultiReplaceAdapter:
         out, qa = replace(source, tracks, spec["assignments"], identities, self._rf(), workdir, progress, cancel,
                           max_seconds=float(spec.get("max_seconds", 15)), model_res=model_res, faces=faces,
                           seed=int(payload.get("attempt", 1)) * 1000)
+        problems: list[str] = []
+        lip = (spec.get("audio") or {}).get("lip_sync") or {}
+        if lip.get("enabled") and spec["audio"].get("speaker_mapping"):
+            # Lip-sync the replaced persons on their mapped segments, then QC sync + motion preservation.
+            from ..audio.core import extract_wav
+            from ..audio.stage import lipsync_and_qc, lipsync_problems
+            from .pipeline import probe
+
+            wav = extract_wav(audio or source, workdir / "lipsync_audio.wav")
+            if wav is None:
+                raise AdapterError("no_audio", "lip-sync requested but the audio track is missing", retryable=False)
+            info = probe(out)
+            progress(0.88, "postprocessing")
+            out, lqa = lipsync_and_qc(out, source, wav, spec["audio"]["speaker_mapping"], tracks, info.n_frames,
+                                      info.fps, {**lip, "preserve": spec["audio"].get("preserve", {})}, workdir)
+            qa.update(lqa)
+            problems += lipsync_problems(qa, int(lip.get("max_offset_ms", 120)), float(lip.get("min_score", 0.25)))
         qa["gpu_seconds"] = time.time() - t0
-        problems = qa_gate(qa, self.min_identity)
+        problems = qa_gate(qa, self.min_identity) + problems
         if problems:
             # Retryable: next attempt gets a new seed and, after FALLBACK_AFTER_S, may route to the fallback model.
             raise AdapterError("qa_failed", ",".join(problems), retryable=True)

@@ -128,6 +128,47 @@ class TemplateOut(ORM):
     est_seconds: int
     accepts_text: bool
     pro_only: bool
+    # V3 additive fields (older clients ignore them)
+    mode: str = "single"
+    person_slots: list[dict] = []
+    est_credits: int | None = None
+    lip_sync_available: bool = False
+
+
+# ---- audio / lip-sync (spec §27)
+class SpeakerSegmentIn(BaseModel):
+    start_ms: int = Field(ge=0)
+    end_ms: int = Field(gt=0)
+    track_id: int | None = Field(default=None, ge=1)
+    slot_id: str | None = Field(default=None, max_length=32)
+
+
+class PreserveIn(BaseModel):
+    head_motion: bool = True
+    expression: bool = True
+    eye_motion: bool = True
+
+
+class LipSyncIn(BaseModel):
+    enabled: bool = False
+    mode: str = Field(default="auto", pattern=r"^(speech|singing|auto)$")
+
+
+class AudioOptionsIn(BaseModel):
+    audio_mode: str = Field(default="original", pattern=r"^(original|custom|none)$")
+    audio_asset_id: uuid.UUID | None = None
+    lip_sync: LipSyncIn = LipSyncIn()
+    speaker_mapping: list[SpeakerSegmentIn] | None = Field(default=None, max_length=200)
+    preserve: PreserveIn = PreserveIn()
+    quality: str = Field(default="standard", pattern=r"^(standard|premium)$")
+
+    def to_options(self):
+        from .services.lipsync import AudioOptions
+        return AudioOptions(audio_mode=self.audio_mode, audio_asset_id=self.audio_asset_id,
+                            lip_sync=self.lip_sync.enabled, mode=self.lip_sync.mode,
+                            speaker_mapping=[s.model_dump() for s in self.speaker_mapping]
+                            if self.speaker_mapping is not None else None,
+                            preserve=self.preserve.model_dump(), quality=self.quality)
 
 
 # ---- generations
@@ -173,6 +214,7 @@ class ReportIn(BaseModel):
 class CreditsOut(BaseModel):
     balance: int
     history: list[dict]
+    buckets: list[dict] = []  # V4: per-bucket remaining + next expiry (additive)
 
 
 # ---- purchases

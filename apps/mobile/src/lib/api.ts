@@ -1,4 +1,5 @@
 import Constants from 'expo-constants';
+import { Platform } from 'react-native';
 import * as Crypto from 'expo-crypto';
 
 import { tokenStore } from './tokenStore';
@@ -18,7 +19,7 @@ export class ApiError extends Error {
   }
 }
 
-type Json = Record<string, unknown> | unknown[] | null;
+export type Json = Record<string, unknown> | unknown[] | null;
 
 let refreshing: Promise<boolean> | null = null;
 
@@ -44,7 +45,7 @@ export async function api<T = any>(
   opts: { method?: string; body?: Json; idempotencyKey?: string; auth?: boolean } = {},
 ): Promise<T> {
   const doFetch = async () => {
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const headers: Record<string, string> = { 'Content-Type': 'application/json', 'X-Client': Platform.OS };
     if (opts.auth !== false) {
       const access = await tokenStore.getAccess();
       if (access) headers.Authorization = `Bearer ${access}`;
@@ -87,11 +88,22 @@ export async function uploadPresigned(
 }
 
 // ---- typed endpoints -------------------------------------------------------------------------
+export type TemplateSlot = { slot_id: string; label: string; required: boolean; thumbnail_url: string | null };
 export type Template = {
   id: string; slug: string; title: string; description: string; category: string;
   thumbnail_url: string | null; preview_url: string | null; duration_s: number; credit_cost: number;
   est_seconds: number; accepts_text: boolean; pro_only: boolean;
+  // V3 (optional so older API responses still type-check)
+  mode?: 'single' | 'remix'; person_slots?: TemplateSlot[]; est_credits?: number | null; lip_sync_available?: boolean;
 };
+/** Server-ranked feed card (GET /feed). Ranking weights never reach the client. */
+export type FeedItem = {
+  id: string; slug: string; title: string; category: string; thumbnail_url: string | null;
+  preview_url: string | null; duration_s: number; est_credits: number; person_slots: number; use_count: number;
+  est_seconds: number; pro_only: boolean; safety_badge: string; mode: 'single' | 'remix';
+  creator: { id: string | null; name: string | null };
+};
+export type Estimate = { credits: number; confirm_required: boolean; balance: number; sufficient: boolean; persons: number };
 export type Generation = {
   id: string; kind: string; status: string; progress: number; queue_position: number | null;
   est_seconds_remaining: number | null; credit_cost: number; refunded: boolean; error_code: string | null;
@@ -111,4 +123,36 @@ export type SourceVideo = {
 export type MultiConfig = {
   enabled: boolean; max_persons: number; max_duration_s: number; min_duration_s: number; resolutions: string[];
   max_upload_mb: number;
+};
+
+// ---- AI Studio (V4 Stage B)
+export type StudioShot = {
+  key: string; duration_s: number; prompt: string; camera?: string; caption?: string | null;
+  dialogue?: { character?: string | null; text: string; start_s: number }[]; transition?: 'cut' | 'fade';
+  derive?: { kind: 'trim' | 'extend' } | null;
+};
+export type Storyboard = {
+  title: string; language: string; aspect_ratio: '9:16' | '16:9' | '1:1'; style: string;
+  scenes: { key: string; title: string; shots: StudioShot[] }[]; limitations: string[];
+  captions: { enabled: boolean; burn_in: boolean };
+};
+export type StudioEstimate = {
+  version_id: string; version: number; credits: number; new_shots: number; reused_shots: number;
+  limitations: string[]; missing_capabilities: string[]; blocked: { shot: string }[]; within_budget: boolean;
+  balance: number; director?: { provider: string; label: string };
+};
+export type StudioProject = {
+  id: string; title: string; status: 'draft' | 'planned' | 'rendering' | 'ready' | 'failed';
+  aspect_ratio: string; current_version: { id: string; version: number; storyboard: Storyboard;
+    director: { provider?: string; label?: string } } | null;
+  shots: { key: string; status: string }[];
+  output: { video_url: string; captions_url: string | null; duration_ms: number } | null;
+};
+export type StudioEdit = {
+  id: string; status: 'proposed' | 'needs_clarification' | 'unsupported' | 'applied' | 'rejected';
+  clarification: string | null; editor: { label?: string }; notes: string[];
+  diff: { added: string[]; removed: string[]; changed: string[]; reordered: boolean;
+          duration_s: { before: number; after: number } } | null;
+  cost: { render_credits_after: number; delta_credits: number; new_shots: number; reused_shots: number } | null;
+  missing_capabilities: string[];
 };

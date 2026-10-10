@@ -1,0 +1,666 @@
+# Master Spec V4: stage reports
+
+Decisions confirmed by the owner on 2026-10-10:
+
+- Use the V4 rollout order. The creator marketplace moves to Stage D.
+- YourStars (`drama/`) stays a separate product. AI Studio is written fresh inside this app; no code is copied from YourStars.
+- Work starts with Stage A.
+
+Earlier V3 work (template remix, multi-person replacement, lip-sync) is described in `docs/V3_PHASE_REPORTS.md`.
+
+## Stage A: production-hardening of the V3 flow (credits, store billing, sharing, economics)
+
+Every part is behind a feature flag and uses additive migrations. The `alembic` downgrade to base and upgrade back to head runs at the start of every test session.
+
+| Part | Feature flag | Migration | Status |
+|---|---|---|---|
+| A1: credit buckets, reserve / settle / release | always on (balances unchanged) | `0005_credit_buckets` | production-ready (tested) |
+| A2: App Store / Play verification, store notifications | `billing` (off) | none (tables already existed) | implemented and tested against the official library and a mocked Play API; needs store credentials |
+| A3: signed share links, deep links, attribution, template reports | `sharing`, `referrals` (off), `moderation` | `0006_share_links` | implemented and tested; universal-link domain still needed |
+| A4: per-job telemetry, economics, job lineage, manual refund | `economics` (config only) | none | implemented and tested |
+
+### A1: credit buckets
+
+**How it works**
+- Every positive ledger entry opens an immutable `credit_lot` in one bucket: promo, subscription, purchased, reward, adjustment or legacy. Each lot has its own optional expiry.
+- Every debit records which lots it used, in `credit_allocations`.
+- A lot's remaining amount is computed from append-only rows. No mutable counter is ever stored. A database trigger blocks UPDATE and DELETE.
+- Spending order:
+  1. lots that expire soonest first;
+  2. then the bucket order from `credits.consume_order`, default promo → reward → subscription → adjustment → legacy → purchased.
+- Expired lots are swept with an `expire` entry on the user's next credit write. Expired credits are never spendable, even before the sweep runs.
+
+**How generation jobs map to the ledger**
+- `generation_debit` is the reservation, taken before dispatch.
+- `generation_settle` (0 delta) confirms a billable completion.
+- `refund` is the release, and returns the credits to the exact lots they came from.
+- `generation_jobs.billing_state` tracks this as `reserved`, `settled` or `released`.
+
+**Migration and API**
+- Existing balances become one `legacy` lot per user, so no balance changes.
+- `GET /credits` gains `buckets` (remaining amount and next expiry). `balance` is now the spendable balance.
+- Also fixed: retrying a clamped purchase reversal used to return 409 by mistake. It is now idempotent.
+
+### A2: store billing
+
+**Purchase verification: `POST /purchases/verify`**
+- iOS: StoreKit 2 signed transactions are verified with **Apple's official App Store Server Library** (MIT licence):
+  - the x5c chain to the configured Apple root certificates;
+  - Apple's leaf and intermediate certificate OIDs;
+  - ES256 signature, bundle id and environment;
+  - OCSP revocation checks in staging and production.
+- Production is tried first, then sandbox, which App Review and TestFlight need. Sandbox purchases are labelled as such.
+- Android: the Play Developer API (endpoints checked against Google's official discovery document) is called with service-account OAuth:
+  - `products.get` for consumables, `subscriptionsv2.get` for subscriptions;
+  - after the grant is committed, consumables are consumed and subscriptions acknowledged.
+- Credits come only from the server-side catalog (`billing.value.products`). Store prices are never stored in our code.
+
+**Idempotency and account binding**
+- Grants are idempotent per store transaction.
+- A transaction belongs to exactly one account, checked by:
+  - the unique provider + transaction id;
+  - `appAccountToken` (iOS) or `obfuscatedExternalAccountId` (Android).
+
+**Subscriptions**
+- Each period grants into a `subscription` lot that expires with that period.
+- The user's plan is recalculated from the subscription state.
+- A late notification can never move the period end backwards.
+
+**Store notifications**
+- `POST /webhooks/apple` takes App Store Server Notifications V2. The payload is verified before it is stored.
+- `POST /webhooks/google` takes Play RTDN through a Pub/Sub push with a URL token. The notification only says what changed; the current state is always re-read from the Play API.
+- Both go through the durable `webhook_events` inbox, which drops duplicates and replays. A notification that failed can be replayed with `POST /admin/webhooks/{id}/replay`.
+- Refunds and revocations reverse the matching grant, starting from its own lot. The reversal is clamped so the balance never goes negative, and any shortfall is recorded.
+
+### A3: sharing and attribution
+
+**Share links**
+- `POST /share-links` creates an HMAC-signed `code.sig` token. Links point at a template, never at a user's private output video.
+- Links can be made for a template, or for the user's own completed job (which links to its template).
+- `GET /share-links/{token}` resolves a link and records a click. Repeated clicks from the same IP hash within an hour count once. The raw IP is never stored.
+
+**Attribution: `POST /share-links/{token}/attribute`**
+- First touch wins, at most one per user.
+- New users only (default: account created within 72 hours).
+- The click must be within a window (default 7 days).
+- Self-referral is ignored.
+- The rules in force are copied onto the attribution row. No money moves here; earnings come in Stage D.
+
+**Web landing and app links**
+- `/t/{token}` serves an escaped page with OG tags and a strict CSP. Its Play Store link carries the install referrer.
+- `/.well-known/apple-app-site-association` and `/.well-known/assetlinks.json` are served from configuration.
+
+**Template reports: `POST /templates/{id}/report`**
+- A template moves to `review` (out of the feed and the app) after N distinct reporters (default 5).
+- A `minor_safety` report moves it to review immediately.
+
+**Mobile**
+- New `t/[token]` deep-link screen.
+- A link opened before sign-up is remembered in SecureStore and attributed once after sign-in.
+- "Share template link" buttons on the template and video screens; "Report template" on the template screen.
+- Turkish and English texts.
+- Account deletion revokes the user's share links.
+
+### A4: unit economics and support tools
+
+- `GET /admin/economics?days=&group=feature|model|template` reports per group:
+  - success rate;
+  - credits settled and released;
+  - paid credits;
+  - cost (all attempts, including failed ones);
+  - cost per success;
+  - p50 and p95 time to result;
+  - retries;
+  - revenue and contribution margin.
+- Revenue counts only settled credits that came from paid buckets. It is computed only when `economics.usd_per_paid_credit` (net of store fees) is set; otherwise revenue is reported as `null`.
+- Alerts: low success rate, negative margin, cost per success above a cap, and GPU daily budget burn.
+- `GET /admin/jobs` searches jobs; `GET /admin/jobs/{id}` shows lineage: attempts, costs, quality data, ledger events and output provenance.
+- `POST /admin/jobs/{id}/refund` is a support refund of a delivered job. It returns credits to their original lots, exactly once, and is audited.
+
+### Environment variables (new)
+
+| Variable | Purpose |
+|---|---|
+| `APP_APPLE_ROOT_CERT_PATHS` | Apple root certificates (DER), downloaded from apple.com/certificateauthority |
+| `APP_APPLE_APP_APPLE_ID` | Required to accept production App Store notifications |
+| `APP_APPLE_ONLINE_CHECKS` | OCSP checks; on by default in staging and production |
+| `APP_GOOGLE_SERVICE_ACCOUNT_FILE` | Play Developer API service account (path to a file from the secrets manager) |
+| `APP_GOOGLE_RTDN_TOKEN` | Shared secret in the Pub/Sub push URL |
+| `APP_SHARE_LINK_SECRET` | Optional; otherwise a key derived from `APP_JWT_SECRET` |
+| `APP_SHARE_BASE_URL`, `APP_APP_SCHEME` | Public link origin; custom URL scheme |
+| `APP_IOS_APP_IDS`, `APP_ANDROID_SHA256_FINGERPRINTS` | Universal links and App Links |
+| `APP_APP_STORE_URL`, `APP_PLAY_STORE_URL` | Store buttons on the landing page |
+
+Remote config (no code change needed):
+- `billing.products`
+- `credits.consume_order`
+- `referrals` (`click_window_days`, `attribution_days`, `new_user_max_age_hours`, `click_dedupe_minutes`)
+- `moderation.template_review_after_reporters`
+- `economics` (`usd_per_paid_credit`, alert thresholds)
+
+New dependency: `app-store-server-library` (MIT licence), added to CI and the API image.
+
+### Tests
+
+**API: 73/73 passed (26 new)**
+- `test_credits_v4.py` (7):
+  - buckets and expiry order;
+  - release returns credits to the same lots;
+  - settle is written once;
+  - expired credits are never spent;
+  - consume order comes from config;
+  - purchase reversal, including retry of a clamped reversal;
+  - append-only triggers;
+  - legacy migration of balances and of in-flight jobs.
+- `test_billing.py` (10):
+  - real ES256 JWS and x5c test certificate chain (with Apple's OIDs) through the official library;
+  - forged signature, unknown root and wrong bundle id are all rejected;
+  - sandbox purchases are accepted and labelled;
+  - idempotent grants and account binding;
+  - full subscription lifecycle with duplicate and out-of-order notifications, refund and expiry;
+  - replay of a notification that arrived before verify;
+  - Play API flow: OAuth assertion, consume/acknowledge only after grant, pending purchases, voided purchases;
+  - RTDN token check and duplicates;
+  - fail-closed when billing is not configured.
+- `test_sharing.py` (7): signature and forgery, idempotent links, job-share IDOR, click dedupe and IP hashing, takedown, attribution rules, landing-page escaping and CSP, AASA, report thresholds.
+- `test_economics.py` (2): paid vs promo revenue, margin is `null` without a price, alerts, job lineage, manual refund exactly once and audited.
+
+**Other checks**
+- Worker 13/13 passed.
+- Mobile `tsc` passes and node tests 5/5.
+- `ruff` clean; `alembic check` shows no drift.
+
+### Security and privacy
+
+- The client can never choose how many credits it gets: grants come from the server catalog plus a store-verified transaction.
+- A forged notification cannot change state:
+  - Apple notifications must carry a valid signature chain;
+  - Google notifications are only pointers, and the state is re-read from Play.
+- Share tokens are HMAC-signed, so forged or guessed links fail without a database lookup.
+- Referrers are never named by the client. IPs are stored only as keyed hashes. Users' generated videos are never exposed through links.
+- Every admin money action (refund, webhook replay) is audited with the admin's identity.
+
+### Cost
+
+No GPU cost changes. A4 makes cost per success and margin visible for each feature, model and template.
+
+### Known limitations
+
+- **No real store integration yet.** The native purchase UI (StoreKit 2 / Play Billing module) is not in the mobile app; the paywall still says "coming soon". Verification has not been tested against real Apple or Google accounts, because no credentials exist yet.
+- **Universal links / App Links need a domain.** A real domain, plus the `associatedDomains` and `intentFilters` settings in `app.json`, are required. Until then the custom `aivideo://` scheme works.
+- **Install attribution is partial.** On iOS a share link survives a fresh install only if the user opens the link again after installing; no device fingerprinting is used, by design. On Android the Play Install Referrer carries the token through install, but the app still needs a native module to read it.
+- **Single template jobs have no pre-dispatch USD estimate** (`est_cost_usd` is null). Multi-person and remix jobs have one.
+- **Expired credits are swept lazily**, on the user's next credit write. There is no batch sweep job yet; expired credits are never spendable in the meantime.
+
+### Next step
+
+Stage B: AI Studio foundations.
+- Project, version, storyboard, scene and shot models.
+- Brief → storyboard → estimate → user confirmation → shot rendering, on the existing job queue and ledger.
+- Subtitle and audio tracks.
+- Character references with consent receipts.
+
+Real video generation needs the `GEMINI_API_KEY` secret. Until then a mock provider is used and labelled as a mock.
+
+## Stage B: AI Studio foundations
+
+Feature flag: `studio` (off). Migration: `0007_studio` (additive, reversible; adds the `studio_shot` and `studio_assemble` job kinds).
+
+### What works
+
+**Projects and immutable versions**
+- `POST /studio/projects` creates a project with title, aspect ratio (9:16, 16:9 or 1:1), language and an optional project budget in credits.
+- Every storyboard change is a new immutable `studio_project_versions` row (a database trigger blocks UPDATE):
+  - `storyboard` = director plan;
+  - `versions` = manual edit;
+  - `revisions/{id}/restore` = restore an earlier version.
+- A storyboard contains scenes, shots, camera, characters, dialogue, captions, transitions, music, quality and honest limitations.
+- Validation:
+  - unique scene and shot keys;
+  - allowed shot durations (default 4, 6 or 8 s);
+  - maximum number of shots and total length;
+  - every character reference resolves;
+  - dialogue fits inside its shot;
+  - every text passes moderation;
+  - characters and music must belong to the user.
+
+**Director (brief → storyboard)**
+- The default is a rule-based planner (one shot per sentence). It is labelled **"rule-based planner (not AI)"** in the response and the app.
+- `gemini` uses the official `google-genai` SDK with a JSON-schema response. It needs `GEMINI_API_KEY` and `studio.director_model`; without them it fails closed.
+- The director's output is validated like a user edit:
+  - ids the model invents are never trusted (characters are re-bound to the user's own);
+  - aspect ratio, quality and music come from the brief;
+  - invalid output returns `director_invalid_output`.
+
+**Estimate → confirm → render**
+- Each shot is identified by a hash of everything that changes its pixels (prompt, camera, duration, style, aspect ratio, quality, characters).
+- A new version reuses every unchanged shot, so editing one shot only re-renders and re-charges that shot. A caption- or music-only edit costs 0 credits and only re-runs the assembly.
+- `render` requires `confirmed_credits` to equal the exact estimate, otherwise it returns 409 `confirmation_required`.
+- Each new shot reserves credits on the existing ledger (reserve / settle / release). If credits run out, the whole render is rolled back.
+- A retry with the same `Idempotency-Key` returns the original result and charges nothing.
+- The render fails closed when:
+  - the project budget would be exceeded;
+  - a single job or the whole project would be above the cost ceiling;
+  - the provider has no configured price (`pricing_not_configured`);
+  - the provider lacks a capability the storyboard needs (`capability_unsupported`, e.g. CHARACTER_REFERENCE).
+- Every shot is an ordinary generation job: same queue, leases, retries, model fallback, per-shot output moderation and provenance.
+- When all shots of the target version are ready, the assembly job is queued automatically, once per version.
+
+**Characters and consent**
+- `POST /studio/characters` creates either:
+  - a fictional character (description only); or
+  - a real likeness, which must use **the user's own ready identity profile** plus `attest_own_likeness`, and creates a consent receipt.
+- `DELETE /studio/characters/{id}/consents` withdraws consent. New renders return `consent_required`. Shots already in the queue are refused when a worker claims them (spec V4 §8: checked at dispatch). The job fails as final and its credits are released.
+- Account deletion revokes all consents and deletes projects and characters.
+
+**Worker**
+- `mock_t2v`: dev/test only, refuses to run in production. Draws a clip clearly labelled "MOCK".
+- `veo`: Google Veo through `google-genai` (`generate_videos` → poll the operation → download). Needs `GEMINI_API_KEY` and `VEO_MODEL`.
+  - Reference images are **not** sent, because that capability is not verified yet.
+  - 1:1 is refused.
+  - Safety-filtered output fails as final; timeouts and cancellation are handled.
+- `studio_assembler` (CPU, ffmpeg):
+  1. normalizes each shot (adds a silent track if it has no audio);
+  2. applies fade transitions and concatenates;
+  3. writes WebVTT captions, optionally burned in;
+  4. mixes the licensed music bed under any shot audio, with a fade-out and loudness normalization (EBU R128, −14 LUFS);
+  5. runs the standard final encode (watermark for free users, AI provenance metadata).
+- Shots are intermediates: they are not watermarked. Only the finished film is.
+
+**Mobile**
+- New "Stüdyo" tab: brief, aspect ratio, free storyboard.
+- Project screen shows:
+  - storyboard, director label and limitations;
+  - an estimate (new / reused shots, balance);
+  - a render button behind a confirmation dialog;
+  - live shot statuses and a video player.
+- Shows "coming soon" while the flag is off.
+
+### API
+
+`/studio/projects` (POST, GET), `/studio/projects/{id}` (GET, PATCH, DELETE), `.../storyboard`, `.../versions` (POST, GET), `.../revisions/{v}/restore`, `.../estimate`, `.../render`, `.../timeline`, `/studio/characters` (POST, GET), `/studio/characters/{id}/consents` (POST, DELETE).
+
+Custom audio upload (`/audio-assets`) now also works when `studio` is on, so users can upload music.
+
+### Environment and config
+
+| Where | Name | Purpose |
+|---|---|---|
+| API | `GEMINI_API_KEY` | Gemini director |
+| Worker | `GEMINI_API_KEY`, `VEO_MODEL` | Veo shot rendering |
+| Remote config | `studio` | `director`, `director_model`, `shot_provider`, `fallback_provider`, `provider_capabilities`, `provider_usd_per_second`, `allowed_shot_durations`, `max_shots`, `max_total_s`, `credits_per_second{standard, premium}`, `assemble_credits`, `max_job_cost_usd`, `max_project_cost_usd` |
+
+New dependency: `google-genai` (Apache-2.0) for the API and for worker images that enable Veo.
+
+### Tests
+
+**API: 80/80 passed (7 new)**
+- Flag gate, rule-based label, estimate, free planning, IDOR.
+- Gemini director with a fake SDK client: schema request, re-binding of ids, invalid JSON, invalid durations, not configured.
+- Edit validation, moderation, versions cannot be updated.
+- Confirmation, reservations, replay, selective re-render (1 of 3 shots), caption-only edit, restore.
+- Pricing, cost ceiling, budget and capability all fail closed.
+- Consent revocation: render blocked, queued shot refused at dispatch and refunded, re-consent works.
+- **Real worker run:** 3 mock shots → automatic assembly → film with music audio, WebVTT captions and watermark. Then a caption-only edit with burn-in → only the assembly runs, 0 credits.
+
+**Other checks**
+- Worker 18/18 passed (5 new): Veo adapter against a fake client (polling, download, config mapping, safety filter, timeout, cancel, not configured), mock reference image, VTT format.
+- Mobile `tsc` passes and node tests 5/5.
+- `ruff` clean; `alembic check` shows no drift.
+
+### Cost
+
+- Planning is free (`director_credits` is 0). A Gemini director call costs tokens; this is not yet metered per call.
+- Shots: `credits_per_second × duration`. The USD cost comes from `provider_usd_per_second`. **Ops must enter verified Veo prices**; until then rendering with Veo is refused.
+- Assembly runs on CPU and is not charged by default (`assemble_credits=0`).
+
+### Known limitations
+
+- **The real Veo route is not tested**, because there is no API key in this environment. Model ids and prices must come from the account's current documentation.
+- **No speech synthesis (TTS) or dubbing.** Dialogue is shown as captions. Lip-sync for Studio shots is not connected yet.
+- **No reference-guided generation.** Character consistency relies on the text description only, and no consistency score is computed yet.
+- The timeline is read-only (`/timeline`). Trim, split and reorder in the UI are Stage C, together with conversational editing.
+- When rendering fails the project is marked `failed`. The user can render again, and only the failed shots are charged.
+
+### Next step
+
+Stage C:
+- conversational editing agent: typed, auditable edit operations that create new versions;
+- shot extend / prepend;
+- timeline trim, split and reorder;
+- revision preview with cost delta.
+
+## Stage C: conversational editing, extend, trim/split/reorder, revisions
+
+Feature flag: `studio` (same as Stage B). Migration: `0008_studio_edits` (additive, reversible).
+
+### What works
+
+**Typed, auditable edit operations**
+- Chat and the timeline produce the same operations (spec V4 §5): `set_shot`, `set_dialogue`, `remove_shot`, `duplicate_shot`, `move_shot`, `split_shot`, `trim_shot`, `extend_shot`, `set_style`, `set_aspect_ratio`, `set_music`, `set_captions`, `replace_character` and `unsupported`.
+- Each edit is stored in `studio_edit_operations` with its source, instruction, editor, operations, status, diff, cost delta and the base and result versions.
+
+**Proposal first, never a silent overwrite**
+- `POST /studio/projects/{id}/edits` creates a proposal. It contains:
+  - the new storyboard, validated exactly like a manual edit (moderation, consent, limits);
+  - a diff of added, removed, changed and reordered shots and the duration change;
+  - the **cost delta**: credits before and after, new vs reused shots, missing capabilities.
+- Nothing changes until `apply`, which writes a new immutable version. `reject` discards the proposal.
+- Applying a proposal made against an older version returns 409 `stale_edit`, so an edit can never silently drop another one.
+- `undo` keeps walking back through the versions. `restore` still works for any version.
+- Timeline buttons use `auto_apply`. They still go through the same validation and versioning, and are audited.
+
+**Free cuts of existing renders**
+- Trimming or splitting a shot that is already rendered creates `derive: trim` shots. The assembler cuts the existing render, so this costs **0 credits** and never calls the provider.
+- Trims of trims are re-based onto the original render.
+- If the shot is not rendered yet, the edit becomes ordinary new-length shots, and the proposal explains this.
+- Duplicating a shot produces the same hash, so the render is reused.
+
+**Extend and prepend**
+- An extension needs the source shot to be rendered first (409 `source_not_rendered` otherwise). It requires the VIDEO_EXTEND or VIDEO_PREPEND capability.
+- Only the extension is charged: duration × credits per second.
+- The worker downloads the source render. The mock provider starts the extension on the source's last frame (or, for a prepend, ends on its first frame) and fades into the new content.
+- **Seam quality is measured**: `seam_score` compares the two boundary frames (1.0 = identical) and is stored in the run's quality data. In the test it was above 0.95; without continuity it falls below 0.9.
+- Veo refuses extension safely (`capability_unsupported`) until it is verified on the account.
+- Inpainting (`/shots/{key}/inpaint`) is rejected with `capability_unsupported` because no provider offers it.
+
+**Editors (instruction → operations)**
+- `rule_based` (default) understands common Turkish and English commands. It is labelled "(not AI)". Examples:
+  - "2. sahneyi 4 saniye uzat" (extend shot 2 by 4 seconds);
+  - "remove shot 3";
+  - "3. sahneyi 1. sahnenin önüne taşı" (move shot 3 before shot 1);
+  - "split shot 1 at 2 seconds";
+  - "kısalt" (shorten), "kopyala" (duplicate), "16:9", "müziği kaldır" (remove the music), "altyazıyı göm" (burn in the captions).
+- Ambiguous requests get a clarification question (which shot, how many seconds, where to move).
+- Requests that need object or background edits or relighting come back as `unsupported` with the missing capability. They are never faked.
+- `gemini` maps the instruction to the same operation schema (`google-genai`, JSON schema). The model can never write a version itself: invalid output returns 502 `editor_invalid_output`, and invented shot keys return 422.
+
+**Mobile**
+- The project screen has a chat edit box: preview (diff and new rendering cost) → apply or discard.
+- Undo button.
+- Per-shot timeline buttons: move up, duplicate, remove, and +4 s extend for rendered shots.
+
+### API (new)
+
+`POST/GET /studio/projects/{id}/edits`, `.../edits/{e}/apply`, `.../edits/{e}/reject`, `.../undo`, `.../shots/{key}/extend`, `.../shots/{key}/inpaint`.
+
+### Config (`studio` remote config)
+
+- `editor`: `rule_based` or `gemini`.
+- `editor_model`: defaults to `director_model`.
+- `provider_capabilities`: `mock_t2v` has VIDEO_EXTEND and VIDEO_PREPEND; `veo` has only TEXT_TO_VIDEO until verified.
+
+### Tests
+
+**API: 84/84 passed (4 new)**
+- Clarification and unsupported answers, proposals that change nothing until applied.
+- Timeline apply, reject, stale protection, auto-apply and undo chain; invalid operations and unknown shots.
+- Gemini editor: validated output, clarification, invalid output.
+- **Real worker run:**
+  - split a rendered shot and trim another: 0 credits;
+  - extend a shot by 4 s: only +8 credits, then render → only the extension and the assembly run;
+  - film length 15 s;
+  - seam score above 0.95;
+  - a Veo project reports VIDEO_EXTEND as missing.
+
+**Other checks**
+- Worker 20/20 passed (2 new): mock extension and prepend seams, Veo refuses extension.
+- Mobile `tsc` passes and node tests 5/5.
+- `ruff` clean; `alembic check` shows no drift.
+
+### Known limitations
+
+- **No real provider supports extension yet.** Veo's video-extension API is not verified, so it is turned off.
+- **Object, background, relight and inpaint edits are not possible.** No provider has the capability; such requests are answered honestly as unsupported.
+- The rule-based editor covers common commands only. Free-form requests need the Gemini editor, which requires the key.
+- Trims and splits are in whole seconds.
+- The mobile timeline has buttons, not drag-and-drop.
+
+### Next step
+
+Stage D: creator marketplace and licensed AI actors.
+- Creator profiles; template submission and moderation.
+- Versioned RevenuePolicy, an append-only creator earnings ledger, settlement snapshots, risk holds and creator analytics.
+- Referral earnings, computed from the Stage A3 attributions.
+- Actor marketplace behind its own flag. It must not be switched on before legal review.
+
+Business decisions are needed before launch: revenue-share percentage, referral commission, minimum payout and settlement delay.
+
+## Stage D: creator marketplace, revenue share, settlements, licensed AI actors
+
+Feature flags:
+- `creator_marketplace` (off);
+- `actor_marketplace` (off). The actor marketplace also needs `legal_review_ref` in its config; turning the flag on alone does nothing.
+
+Migration: `0009_creator_economy` (additive, reversible). Money tables are append-only, enforced by a database trigger.
+
+### Creators
+
+**Onboarding**
+- Adults only, terms acceptance, unique handle, public profile.
+- Payout and KYC data are not stored. Only the external provider's reference and a status are kept.
+
+**Template submission**
+1. The creator creates a draft.
+2. The creator uploads the source clip, which needs:
+   - a rights basis: creator-owned or licensed;
+   - evidence references;
+   - confirmation that **everyone visible** agreed to its use as a remix template.
+3. The clip belongs to the creator's own account, which also fixes the old "admin-owned source clip" issue for creator templates.
+4. The creator defines slots and creates a version. Models and pricing are set by the platform.
+5. The creator submits it: review queue → admin publish, or reject.
+
+**Suspension**
+- Removes the creator's templates from the app and holds their payouts.
+- Publishing is refused while the creator is suspended.
+
+### Money: policies, earnings, clawbacks, settlements
+
+**Revenue policy**
+- `RevenuePolicy` is versioned and immutable.
+- **With no policy nothing accrues.** Rates are your decision and are never defaulted in code.
+- Policy settings:
+  - creator, referral and actor share rates;
+  - template-vs-referral precedence, or explicit stacking;
+  - `usd_per_paid_credit` (net revenue per paid credit);
+  - settlement delay;
+  - minimum payout;
+  - risk thresholds.
+
+**Earnings (`creator_earnings`, append-only, USD micros)**
+- Only paid production credits that a settled job actually consumed are counted.
+- Promo, reward, legacy and **sandbox** credits never earn. Sandbox purchases now go to the promo bucket.
+- Self-use never earns.
+- Each earning row keeps the policy version it was computed with.
+
+**Clawbacks**
+- A support refund claws back the job's earnings in full.
+- A store refund or chargeback claws back in proportion to how much of each job that purchase paid for.
+- If money was already paid out, the clawback offsets future earnings.
+
+**Settlements**
+- Each payable row is batched exactly once, with a snapshot of the rows and policies.
+- Risk signals (refund rate, single-payer concentration, open reports, open hold) put the settlement on `held` and open a risk hold for review.
+- Flow: approve → pay. Paying requires a **verified payout account** and an external payout reference. The payout is written as a negative ledger row.
+
+**Endpoints**
+- Creators: `/creator/earnings`, `/creator/analytics` (per template: views, generations, successful generations, paid qualifying uses, conversion, gross attributable revenue, platform deductions, creator earnings; plus referral earnings).
+- Admin: `/admin/revenue-policies`, `/admin/settlements/run`, `/admin/settlements/{id}/{approve|hold|cancel|pay}`, `/admin/creators/risk-holds`, `/admin/creators/{id}/status`, `/admin/creators/{id}/payout-status`, `/admin/templates/review-queue`.
+
+### Licensed AI actors (behind flag and legal gate)
+
+**Listings**
+- A creator can list only **their own** ready identity profile, with a consent receipt and versioned terms:
+  - permitted uses and territories;
+  - licence duration;
+  - commercial use;
+  - prohibited contexts (adult and political are always added);
+  - price;
+  - attribution;
+  - always revocable.
+- A listing goes live after moderation.
+
+**Licences**
+- Bought with confirmation of the exact price, and idempotent.
+- The licence keeps a snapshot of the terms.
+- The fee is charged in credits (`license_fee`). The owner's paid share is a separate ledger kind (`actor_license`).
+
+**Use in Studio**
+- A character can be linked to a licence.
+- A storyboard that uses the actor in a prohibited context returns `license_terms_violation`.
+- The licence is re-checked at shot dispatch and again at publication (assembly). Every check is logged in `license_usage_events`.
+- An attribution caption is added when the terms require it.
+
+**Withdrawal or moderation removal**
+- The listing is removed and consent revoked.
+- All licences end, the unused time is refunded pro rata, and the owner's earning is clawed back in the same proportion.
+- Queued work using the actor is refused.
+
+### Mobile
+
+Profile → Creator screen: become a creator (with terms), balances (payable, in hold period, paid), template review status.
+
+### Tests
+
+**API: 95/95 passed (11 new)**
+- `test_creators.py` (7):
+  - onboarding and public profile;
+  - submission needs rights and consent, the review queue, publish, suspension;
+  - accrual rules: no policy, promo, self-use, immutability;
+  - precedence vs stacking, and policy versioning;
+  - clawbacks (store refund proportional, support refund full);
+  - settlement with risk hold, release, approve, payout needing verification and a reference, balances, analytics;
+  - policy validation and immutability.
+- `test_actors.py` (4):
+  - legal gate and listing rules;
+  - price confirmation, territory, actor earnings;
+  - Studio use with prohibited context, dispatch and publish checks, attribution, withdrawal with refund and clawback, refusal at publication;
+  - moderation takedown.
+
+**Other checks**
+- Worker 20/20 passed.
+- Mobile `tsc` passes and node tests 5/5.
+- `ruff` clean; `alembic check` shows no drift.
+
+### Known limitations
+
+See `docs/EKSIKLER.md` §4. The main ones:
+- no real payout or KYC provider;
+- no tax rules;
+- settlements are not scheduled;
+- fraud signals are simple rules;
+- no admin or mobile UI for creator uploads or the actor marketplace;
+- prohibited contexts are checked by keywords only;
+- the actor marketplace must not launch before legal review.
+
+### Next step
+
+Stage E:
+- a provider benchmark harness on consented test clips (quality, cost, latency, failure rate);
+- a model-routing table;
+- adapters for running on our own GPUs;
+- scheduled jobs (metrics, settlements, expiry, lifecycle);
+- load tests;
+- backup and restore;
+- internationalization.
+
+## Stage E: provider routing, benchmarks, scheduled operations, load/backup drills
+
+Feature flags:
+- `routing` (off = the configured provider, exactly as before);
+- `retention` and `creator_marketplace.auto_settle` (config only).
+
+Migration: `0010_benchmarks_and_scheduler` (additive, reversible).
+
+### Model registry and adaptive router
+
+**Registry (`services/router.py`)**
+- Merges the Studio provider config with `routing.providers` overrides.
+- Each provider has capabilities, a verified USD price per second, and a quality score. The score comes from **blind benchmark reviews** when they exist, otherwise from config.
+
+**Eligibility.** A provider is excluded when any of these holds:
+- its kill switch is on (`model_disabled:*`);
+- a needed capability is missing;
+- it has no price;
+- it is **unhealthy**: its recent failure rate (from `model_runs`, over a window, once there are enough runs) is above the limit. This suspends it automatically (spec V4 §12);
+- its measured quality is below the floor.
+
+**Choice**
+- Standard tier: the cheapest eligible provider; the next one is the fallback.
+- Premium tier: the highest quality.
+- One provider is used per render, so shots look consistent.
+- If nothing is eligible, the Studio estimate says so and render returns 503 `no_eligible_provider`.
+
+**Admin:** `GET /admin/models` (registry, health, kill switches), `GET /admin/routing/preview`.
+
+### Benchmark harness (`services/benchmarks.py`)
+
+- **Sets** are versioned evaluation sets with categories (dance, comedy, dialogue, ...) and a rights note. A set is frozen on its first run.
+- **Runs** render every case on every chosen provider as normal studio shot jobs owned by the admin, charged **0 credits**, with full telemetry.
+- **Report** per provider and per category:
+  - success rate;
+  - p50 and p95 latency;
+  - cost and cost per success;
+  - QA samples;
+  - review score.
+  
+  Cases a provider hasn't processed are shown as pending; no result is invented.
+- **Blind human review:** the queue shows the prompt and the video, never the provider, in a provider-neutral order. Each result can be reviewed once (adherence and quality, 1–5).
+- **Feedback into routing:** the mean blind score becomes the router's quality value.
+
+### Scheduled operations (`app/scheduler.py`)
+
+**Tasks**
+- `template_metrics`
+- `credit_expiry`: sweeps users who never came back.
+- `settlements`: only when `auto_settle` is on and a policy exists.
+- `retention`: storage purge for deleted studio projects after a grace period, and an optional output retention period.
+- `play_finalize_retry`: Play acknowledge/consume failures are now marked and retried.
+- `webhook_retry`: failed store notifications, with an attempt limit.
+
+**Safety**
+- Each task runs in its own transaction under a PostgreSQL advisory lock, so a second scheduler skips it instead of running it twice.
+- Every run is logged in `scheduled_runs` (status, result, error).
+
+**How to run**
+- CLI: `python -m app.scheduler all|<task>`
+- Endpoint: `POST /internal/cron/{task}` with `X-Cron-Token` (`APP_CRON_TOKEN`; without it the endpoint returns 503).
+- Run log: `GET /admin/scheduler/runs`
+
+### Load test, backup drill, internationalization
+
+**Load test: `infra/scripts/loadtest.py`** (async: feed, templates, config, credits, generations, health)
+- Local run: 2 uvicorn workers on the same machine as the client, 50 concurrent virtual users, 2000 requests.
+- Result: **0 errors, ~220 requests/s, p50 147 ms, p95 634 ms, p99 890 ms.**
+- This is a regression baseline, not a production capacity figure. The client and server shared one machine and the database was empty, so most of the latency is local contention. Production capacity must be measured on the deployed topology.
+
+**Backup and restore: `infra/scripts/backup_restore_check.sh`**
+1. `pg_dump` the database.
+2. Restore it into a scratch database.
+3. Check identical row counts in all 51 tables, the presence of the append-only triggers (9), and that the credit ledger reconciles.
+4. Drop the scratch database.
+
+It ran here with **BACKUP/RESTORE OK**.
+
+**Internationalization**
+- Mobile test that every locale has exactly the English keys and the same `{{placeholders}}`. TR and EN match.
+
+### Tests
+
+- **API: 98/98 passed** (3 new in `test_ops.py`):
+  - static → adaptive routing: price, kill switch, capability, premium tier, automatic suspension on failure rate, quality floor, estimate and render with no eligible provider;
+  - **real worker benchmark run** with blind review feeding the router's quality value; no user credit is touched;
+  - scheduler tasks, advisory-lock skip, cron authentication, CLI, run log.
+- **Mobile:** node tests 6/6 (locale parity is new); `tsc` passes.
+- **Worker:** 20/20.
+
+### Known limitations
+
+- Running on our own GPUs is still the existing worker adapters (DreamID-V, Wan2.2, LatentSync/MuseTalk). They are gated and not validated on a GPU.
+- Benchmark quality depends on human reviews; there is no automatic quality metric yet (identity drift and flicker scores come in V5).
+- No real infrastructure-as-code (Terraform) or multi-region failover. The scheduler needs an external trigger (cron / Kubernetes CronJob).
+- Only two languages exist (TR, EN). Adding more needs translators; RTL layout is untested.
+
+### Next step
+
+Master Spec V5 (self-learning engine), its phase A: audit and gap report against V5 before writing any code.

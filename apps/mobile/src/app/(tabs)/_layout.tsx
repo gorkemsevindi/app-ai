@@ -10,6 +10,7 @@ export default function TabsLayout() {
     <Tabs screenOptions={{ tabBarActiveTintColor: c.accent, headerTitleStyle: { fontWeight: '800' } }}>
       <Tabs.Screen name="index" options={{ title: t('tabs.discover') }} />
       <Tabs.Screen name="video" options={{ title: t('tabs.video') }} />
+      <Tabs.Screen name="studio" options={{ title: t('tabs.studio') }} />
       <Tabs.Screen name="library" options={{ title: t('tabs.library') }} />
       <Tabs.Screen name="profile" options={{ title: t('tabs.profile') }} />
     </Tabs>

@@ -15,9 +15,11 @@ export default function ProfileTab() {
   const c = useColors();
   const { me, signOut, refreshMe } = useAuth();
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [consent, setConsent] = useState<Record<string, boolean> | null>(null);
   useFocusEffect(useCallback(() => {
     refreshMe();
     api<Profile[]>('/identity-profiles').then(setProfiles).catch(() => {});
+    api<{ consents: Record<string, boolean> }>('/me/learning-consent').then((r) => setConsent(r.consents)).catch(() => {});
   }, [refreshMe]));
 
   const deleteProfile = (p: Profile) =>
@@ -62,6 +64,8 @@ export default function ProfileTab() {
         </Card>
       ))}
       <Button title={t('profile.newProfile')} variant="secondary" onPress={() => router.push('/identity/new')} />
+      <Button title={t('creator.title')} variant="secondary" onPress={() => router.push('/creator')} />
+      <Button title={t('character.title')} variant="secondary" onPress={() => router.push('/characters')} />
       <Title style={{ fontSize: 20 }}>{t('profile.language')}</Title>
       <View style={{ flexDirection: 'row', gap: spacing.sm }}>
         {SUPPORTED.map((l) => (
@@ -71,6 +75,19 @@ export default function ProfileTab() {
           }} />
         ))}
       </View>
+      {consent ? (
+        <Card style={{ gap: spacing.sm }}>
+          <Body>{t('learning.title')}</Body>
+          {(['technical_improvement', 'content_training', 'personalization'] as const).map((k) => (
+            <Chip key={k} label={`${t(`learning.${k}`)}: ${consent[k] ? t('learning.on') : t('learning.off')}`} active={consent[k]}
+              onPress={() => api<{ consents: Record<string, boolean> }>('/me/learning-consent', { method: 'PUT', body: { [k]: !consent[k] } })
+                .then((r) => setConsent(r.consents)).catch(() => {})} />
+          ))}
+          <Body muted>{t('learning.note')}</Body>
+          <Button title={t('learning.delete')} variant="secondary" onPress={() => api<{ consents: Record<string, boolean> }>('/me/learning-data', { method: 'DELETE' })
+            .then((r) => { setConsent(r.consents); Alert.alert(t('learning.deleted')); }).catch(() => {})} />
+        </Card>
+      ) : null}
       <Button title={t('profile.signOut')} variant="secondary" onPress={async () => { await signOut(); router.replace('/onboarding'); }} />
       <Button title={t('profile.deleteAccount')} variant="danger" onPress={deleteAccount} />
     </ScrollView>

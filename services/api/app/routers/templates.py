@@ -8,6 +8,8 @@ from ..db import get_db
 from ..errors import not_found
 from ..models import Template
 from ..schemas import TemplateOut
+from ..services import lipsync
+from ..services import templates_v3 as tv3
 
 router = APIRouter(tags=["templates"])
 
@@ -18,7 +20,8 @@ CATEGORIES = ["trending", "new", "funny", "cinematic", "dance", "fashion", "trav
 def list_templates(category: str | None = None, locale: str | None = None,
                    limit: int = Query(default=50, le=100), offset: int = 0, db: Session = Depends(get_db)):
     q = select(Template).where(Template.is_active.is_(True), Template.deleted_at.is_(None),
-                               Template.current_version_id.isnot(None))
+                               Template.current_version_id.isnot(None), Template.visibility == "public",
+                               Template.moderation_status == "approved")
     if category == "new":
         q = q.order_by(Template.created_at.desc())
     else:
@@ -39,6 +42,16 @@ def categories():
 @router.get("/templates/{template_id}", response_model=TemplateOut)
 def get_template(template_id: uuid.UUID, db: Session = Depends(get_db)):
     t = db.get(Template, template_id)
-    if t is None or not t.is_active or t.deleted_at is not None:
+    if t is None or not tv3.is_usable(t):
         raise not_found("template")
-    return t
+    out = TemplateOut.model_validate(t)
+    v = tv3.current_version(db, t)
+    slots = tv3.slots_of(db, v)
+    if tv3.is_remix(v, slots):
+        out.mode = "remix"
+        out.person_slots = tv3.slot_out(db, v)
+        out.est_credits = tv3.quote(db, t, v, 1, "720x1280", False)["credits"]
+        out.lip_sync_available = lipsync.config(db)[0] and bool((v.config or {}).get("speaker_mapping"))
+    else:
+        out.est_credits = t.credit_cost
+    return out

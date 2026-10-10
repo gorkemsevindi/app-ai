@@ -22,7 +22,6 @@ from ..models import (
     JobAssignment,
     JobKind,
     JobStatus,
-    LedgerReason,
     ModerationAction,
     ProfileStatus,
     SourceVideo,
@@ -30,7 +29,7 @@ from ..models import (
     User,
     VideoPerson,
 )
-from . import credits
+from . import credits, lipsync
 from .storage import VIDEO_MIMES, get_storage, mime_compatible, sniff_mime
 
 ATTESTATION_VERSION = "video-rights-v1"
@@ -133,9 +132,10 @@ def create_video(db: Session, user: User, mime: str, size_bytes: int, owns_right
     return v
 
 
-def complete_upload(db: Session, user: User, video: SourceVideo) -> SourceVideo:
-    """Validate the uploaded bytes and enqueue the (free) analysis job."""
-    cfg = require_enabled(db)
+def complete_upload(db: Session, user: User, video: SourceVideo, cfg: MPConfig | None = None) -> SourceVideo:
+    """Validate the uploaded bytes and enqueue the (free) analysis job. Template ingestion passes its own
+    config so it works while the consumer multi-person feature is still disabled."""
+    cfg = cfg or require_enabled(db)
     if video.status != SourceVideoStatus.pending_upload:
         return video
     st = get_storage()
@@ -154,7 +154,7 @@ def complete_upload(db: Session, user: User, video: SourceVideo) -> SourceVideo:
         idempotency_key=f"analysis:{video.id}", credit_cost=0, max_attempts=get_settings().job_max_attempts,
         preferred_model=cfg["analysis_model"], fallback_model=None, watermark=False,
         spec={"max_persons_detect": cfg["max_persons"] * 2, "max_duration_s": cfg["max_duration_s"],
-              "min_face_px": cfg["min_face_px"]},
+              "min_face_px": cfg["min_face_px"], "audio_analysis": lipsync.audio_analysis_enabled(db)},
     )
     db.add(job)
     video.status, video.analysis_job_id = SourceVideoStatus.analyzing, job.id
@@ -171,8 +171,11 @@ def apply_analysis(db: Session, job: GenerationJob, output: dict) -> None:
     a = output.get("analysis", {})
     video.duration_ms, video.width, video.height = a.get("duration_ms"), a.get("width"), a.get("height")
     video.fps = a.get("fps")
-    video.analysis = {"flags": a.get("flags", []), "models": a.get("models", {}), "timing": a.get("timing", {}),
-                      "scene_cuts": a.get("scene_cuts", [])}
+    # Merge, don't replace: ingestion metadata (e.g. template_id) set before analysis must survive.
+    video.analysis = {**(video.analysis or {}), "flags": a.get("flags", []), "models": a.get("models", {}),
+                      "timing": a.get("timing", {}), "scene_cuts": a.get("scene_cuts", [])}
+    if a.get("audio") is not None:
+        video.analysis["audio"] = a["audio"]  # speaker timeline in worker track ids (see lipsync.speakers)
     for flag, category in VIDEO_BLOCK_FLAGS.items():
         if flag in a.get("flags", []):
             video.status, video.rejection_reason = SourceVideoStatus.rejected, "video not allowed"
@@ -251,10 +254,14 @@ def validate_assignments(db: Session, user: User, video: SourceVideo, cfg: MPCon
     return out
 
 
-def create_replace_job(db: Session, user: User, video_id: uuid.UUID, assignments: list[tuple[int, uuid.UUID]],
-                       resolution: str, preview: bool, idempotency_key: str) -> tuple[GenerationJob, bool]:
-    from .generation import queue_class_for
+def audio_plan(db: Session, user: User, video: SourceVideo, pairs: list, opts, **kw) -> lipsync.AudioPlan:
+    assigned = {p.track_id: p.stats.get("worker_track_id") for p, _ in pairs}
+    return lipsync.plan(db, user, video, assigned, opts, len(pairs), **kw)
 
+
+def create_replace_job(db: Session, user: User, video_id: uuid.UUID, assignments: list[tuple[int, uuid.UUID]],
+                       resolution: str, preview: bool, idempotency_key: str,
+                       audio: lipsync.AudioOptions | None = None) -> tuple[GenerationJob, bool]:
     cfg = require_enabled(db)
     existing = db.execute(select(GenerationJob).where(GenerationJob.user_id == user.id,
                                                       GenerationJob.idempotency_key == idempotency_key)
@@ -265,7 +272,9 @@ def create_replace_job(db: Session, user: User, video_id: uuid.UUID, assignments
         return existing, False
     video = get_own_video(db, user, video_id)
     pairs = validate_assignments(db, user, video, cfg, assignments)
-    cost = quote(cfg, len(pairs), video.duration_ms or 0, resolution, preview)
+    ap = audio_plan(db, user, video, pairs, audio)
+    cost = quote(cfg, len(pairs), video.duration_ms or 0, resolution, preview) + (0 if preview else ap.extra_credits)
+    lipsync.enforce_economics(db, cost, ap.est_cost_usd)
 
     credits.lock_user(db, user.id)
     active = db.execute(select(func.count()).select_from(GenerationJob).where(
@@ -274,29 +283,45 @@ def create_replace_job(db: Session, user: User, video_id: uuid.UUID, assignments
     if active >= get_settings().max_active_jobs_per_user:
         raise ApiError(429, "too_many_active_jobs", "wait for your current videos to finish")
 
+    job = enqueue_replace(db, user, video, pairs, cost, idempotency_key, resolution=resolution, preview=preview,
+                          max_seconds=cfg["preview_seconds"] if preview else cfg["max_duration_s"],
+                          preferred_model=cfg["preferred_model"], fallback_model=cfg["fallback_model"],
+                          force_watermark=bool(cfg["force_watermark"]),
+                          extra_spec={"audio": ap.spec, "est_cost_usd": ap.est_cost_usd})
+    return job, True
+
+
+def enqueue_replace(db: Session, user: User, video: SourceVideo, pairs: list, cost: int, idempotency_key: str, *,
+                    resolution: str, preview: bool, max_seconds: float, preferred_model: str,
+                    fallback_model: str | None, force_watermark: bool, extra_spec: dict | None = None,
+                    template_id: uuid.UUID | None = None, template_version_id: uuid.UUID | None = None
+                    ) -> GenerationJob:
+    """Shared by user-video replacement and template remix: one job row, assignments, one debit."""
+    from .generation import queue_class_for
+
     qc = queue_class_for(user)
     single_fast_path = len(pairs) == 1 and not (set(pairs[0][0].flags) & {"heavy_occlusion", "reentry"})
     job = GenerationJob(
         id=uuid.uuid4(), user_id=user.id, kind=JobKind.multi_replace, source_video_id=video.id,
+        template_id=template_id, template_version_id=template_version_id,
         status=JobStatus.queued, queue_class=qc, idempotency_key=idempotency_key, credit_cost=cost,
         max_attempts=get_settings().job_max_attempts,
-        preferred_model=cfg["preferred_model"], fallback_model=cfg["fallback_model"],
-        watermark=bool(cfg["force_watermark"]) or qc == "free",
+        preferred_model=preferred_model, fallback_model=fallback_model,
+        watermark=force_watermark or qc == "free",
         spec={"resolution": "480x832" if preview else resolution, "preview": preview,
-              "max_seconds": cfg["preview_seconds"] if preview else cfg["max_duration_s"],
-              "fast_path": single_fast_path,
+              "max_seconds": max_seconds, "fast_path": single_fast_path,
               "assignments": [{"track_id": p.track_id, "profile_id": str(prof.id),
                                "first_frame": p.first_frame, "last_frame": p.last_frame,
-                               "worker_track_id": p.stats.get("worker_track_id")} for p, prof in pairs]},
+                               "worker_track_id": p.stats.get("worker_track_id")} for p, prof in pairs],
+              **(extra_spec or {})},
     )
     db.add(job)
     db.flush()
     for p, prof in pairs:
         db.add(JobAssignment(job_id=job.id, track_id=p.track_id, profile_id=prof.id))
-    if cost:
-        credits.apply(db, user.id, -cost, LedgerReason.generation_debit, f"gen:{job.id}",
-                      ref_type="generation_job", ref_id=str(job.id))
-    return job, True
+    job.est_cost_usd = (extra_spec or {}).get("est_cost_usd")
+    credits.reserve(db, job)
+    return job
 
 
 def build_payload(db: Session, job: GenerationJob) -> dict:
@@ -335,6 +360,13 @@ def build_payload(db: Session, job: GenerationJob) -> dict:
         identities[str(a["track_id"])] = [{"id": str(x.id), "kind": x.kind, "url": st.presign_get(x.storage_key, 3600)}
                                           for x in assets]
     base["identities"] = identities
+    audio_id = (job.spec.get("audio") or {}).get("audio_asset_id")
+    if audio_id:
+        from ..models import AudioAsset
+        a = db.get(AudioAsset, uuid.UUID(audio_id))
+        if a is None or a.deleted_at is not None:
+            raise ApiError(410, "audio_gone", "custom audio deleted")
+        base["audio_url"] = st.presign_get(a.storage_key, 3600)
     base["params"] = {"resolution": job.spec.get("resolution", "720x1280")}
     base["upload"] = {
         "video": {"key": output_key(job, "video.mp4"),

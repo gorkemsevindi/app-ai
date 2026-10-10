@@ -23,7 +23,6 @@ from ..models import (
     IdentityProfile,
     JobKind,
     JobStatus,
-    LedgerReason,
     ModelRun,
     ModerationAction,
     ProfileStatus,
@@ -31,8 +30,10 @@ from ..models import (
     TemplateVersion,
     User,
 )
-from . import credits, moderation
+from . import credits, learning, moderation
 from .storage import get_storage
+
+_LEARNING_LISTENER = learning._capture_terminal_jobs  # importing learning registers its job-outcome flush hook
 
 ACTIVE_STATUSES = {JobStatus.preprocessing, JobStatus.generating, JobStatus.postprocessing, JobStatus.moderation}
 
@@ -76,11 +77,11 @@ def queue_class_for(user: User) -> str:
 
 
 def _refund(db: Session, job: GenerationJob, why: str) -> None:
-    if job.refunded or job.credit_cost == 0:
-        return
-    credits.apply(db, job.user_id, job.credit_cost, LedgerReason.refund, f"refund:{job.id}",
-                  ref_type="generation_job", ref_id=str(job.id), note=why)
-    job.refunded = True
+    credits.release(db, job, why)
+    if job.kind == JobKind.studio_shot and (job.spec or {}).get("character_usage"):
+        from . import character_market
+
+        character_market.on_job_released(db, job)  # no royalty for refunded usage
 
 
 def _disabled_models(db: Session) -> set[str]:
@@ -160,9 +161,7 @@ def create_job(db: Session, user: User, template_id: uuid.UUID, profile_id: uuid
     )
     db.add(job)
     db.flush()
-    if tpl.credit_cost:
-        credits.apply(db, user.id, -tpl.credit_cost, LedgerReason.generation_debit, f"gen:{job.id}",
-                      ref_type="generation_job", ref_id=str(job.id))
+    credits.reserve(db, job)
     return CreateResult(job, True)
 
 
@@ -231,6 +230,23 @@ def _on_terminal_failure(db: Session, job: GenerationJob) -> None:
         from . import multiperson
 
         multiperson.mark_analysis_failed(db, job)
+    if job.studio_project_id is not None:
+        from . import studio
+
+        studio.on_job_failed(db, job)
+    if job.kind == JobKind.character_asset:
+        from . import characters
+
+        characters.on_asset_failed(db, job)
+
+
+def refuse_dispatch(db: Session, job: GenerationJob, code: str, message: str) -> None:
+    """A claimed job whose authorization no longer holds (e.g. consent revoked): fail final + release credits."""
+    _close_run(db, job, "failed", {}, error=code)
+    job.error_code, job.error_message = code, message
+    transition(job, JobStatus.failed)
+    _refund(db, job, code)
+    _on_terminal_failure(db, job)
 
 
 def _requeue_or_fail(db: Session, job: GenerationJob, code: str, message: str) -> None:
@@ -333,6 +349,11 @@ def complete(db: Session, job_id: uuid.UUID, worker_id: str, attempt: int, outpu
         transition(job, JobStatus.completed)
         return job
 
+    if job.kind == JobKind.character_asset:
+        return _complete_character_asset(db, job, output, moderation_report)
+    if job.kind == JobKind.editor_render:
+        return _complete_editor_render(db, job, output, moderation_report)
+
     storage = get_storage()
     video_key = output_key(job, "video.mp4")
     head = storage.head(video_key)
@@ -350,6 +371,18 @@ def complete(db: Session, job_id: uuid.UUID, worker_id: str, attempt: int, outpu
         _refund(db, job, "output_blocked")
         return job
 
+    if job.kind == JobKind.studio_shot and (job.spec or {}).get("identity_gate"):
+        from . import studio
+
+        code = studio.identity_gate(db, job, metrics)
+        if code:  # strict character lock: not delivered, refunded; bounded retry or explicit failure
+            storage.delete(video_key)
+            job.error_code, job.error_message = code, "the character identity check did not pass"
+            transition(job, JobStatus.failed)
+            _refund(db, job, code)
+            studio.on_identity_failed(db, job)
+            return job
+
     thumb_key = output_key(job, "thumb.jpg")
     db.add(GenerationOutput(
         job_id=job.id, video_key=video_key,
@@ -358,11 +391,72 @@ def complete(db: Session, job_id: uuid.UUID, worker_id: str, attempt: int, outpu
         duration_ms=int(output.get("duration_ms", 5000)), size_bytes=int(head["size"]),
         codec=str(output.get("codec", "h264")), watermarked=job.watermark,
         provenance={"ai_generated": True, "model": job.model_used, "job_id": str(job.id),
+                    "template_id": str(job.template_id) if job.template_id else None,
+                    "template_version_id": str(job.template_version_id) if job.template_version_id else None,
+                    "source_video_id": str(job.source_video_id) if job.source_video_id else None,
                     "c2pa": bool(output.get("c2pa")), "generated_at": now().isoformat()},
     ))
     job.progress = 1.0
     job.error_code = job.error_message = None
     transition(job, JobStatus.completed)
+    credits.settle(db, job)
+    if job.billing_state == "settled":
+        from . import character_market, creators
+
+        character_market.on_job_settled(db, job)  # V6 waterfall: contractual royalties first
+        creators.on_job_settled(db, job)
+    if job.studio_project_id is not None:
+        from . import studio
+
+        studio.on_job_completed(db, job, video_key, int(output.get("duration_ms", 5000)))
+    return job
+
+
+def _complete_character_asset(db: Session, job: GenerationJob, output: dict, report: dict) -> GenerationJob:
+    from . import characters
+
+    decision = moderation.check_output(report)
+    if not decision.allowed:
+        db.add(ModerationAction(job_id=job.id, target_user_id=job.user_id, source="auto_output",
+                                action="block_output", category=decision.category, note=",".join(decision.reasons)))
+        get_storage().delete(characters.asset_key(job))
+        job.error_code, job.error_message = "output_blocked", "the image did not pass our safety checks"
+        transition(job, JobStatus.failed)
+        _refund(db, job, "output_blocked")
+        characters.on_asset_failed(db, job)
+        return job
+    err = characters.on_asset_completed(db, job, output)
+    if err:
+        _requeue_or_fail(db, job, err, "worker reported success but no image was stored")
+        return job
+    job.progress = 1.0
+    job.error_code = job.error_message = None
+    transition(job, JobStatus.completed)
+    credits.settle(db, job)
+    return job
+
+
+def _complete_editor_render(db: Session, job: GenerationJob, output: dict, report: dict) -> GenerationJob:
+    from . import editor
+
+    key = editor.output_key(job)
+    head = get_storage().head(key)
+    if head is None or head["size"] <= 0:
+        _requeue_or_fail(db, job, "output_missing", "worker reported success but no file was stored")
+        return job
+    decision = moderation.check_output(report)
+    if not decision.allowed:
+        db.add(ModerationAction(job_id=job.id, target_user_id=job.user_id, source="auto_output",
+                                action="block_output", category=decision.category, note=",".join(decision.reasons)))
+        get_storage().delete(key)
+        job.error_code, job.error_message = "output_blocked", "the export did not pass our safety checks"
+        transition(job, JobStatus.failed)
+        _refund(db, job, "output_blocked")
+        return job
+    job.progress = 1.0
+    job.error_code = job.error_message = None
+    transition(job, JobStatus.completed)
+    credits.settle(db, job)
     return job
 
 
@@ -412,6 +506,18 @@ def compile_prompt(ver: TemplateVersion, user_text: str | None) -> str:
 
 
 def build_worker_payload(db: Session, job: GenerationJob) -> dict:
+    if job.kind in (JobKind.studio_shot, JobKind.studio_assemble):
+        from . import studio
+
+        return studio.build_payload(db, job)
+    if job.kind == JobKind.character_asset:
+        from . import characters
+
+        return characters.build_payload(db, job)
+    if job.kind == JobKind.editor_render:
+        from . import editor
+
+        return editor.build_payload(db, job)
     if job.kind != JobKind.template:
         from . import multiperson
 
