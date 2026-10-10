@@ -67,6 +67,9 @@ def delete_user_data(db: Session, user: User, actor_id=None, ip: str | None = No
     db.execute(update(StudioCharacter).where(StudioCharacter.user_id == user.id)
                .values(deleted_at=now, identity_profile_id=None, description="", traits={}))
     db.execute(update(StudioProject).where(StudioProject.user_id == user.id).values(deleted_at=now))
+    from ..services import learning
+
+    learning.delete_learning_data(db, user, source="account_deletion")
     job_ids = select(GenerationJob.id).where(GenerationJob.user_id == user.id)
     db.execute(update(GenerationOutput).where(GenerationOutput.job_id.in_(job_ids)).values(deleted_at=now))
     db.execute(update(GenerationJob).where(GenerationJob.user_id == user.id).values(user_text=None))

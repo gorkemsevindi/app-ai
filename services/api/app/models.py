@@ -829,6 +829,81 @@ class ScheduledRun(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+# ---------------------------------------------------------------- learning foundation (V5 Phase B)
+
+class ConsentRecord(Base):
+    """Append-only learning-consent receipts per purpose. The latest row per purpose wins; none = default."""
+
+    __tablename__ = "consent_records"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    purpose: Mapped[str] = mapped_column(String(32))  # technical_improvement|content_training|personalization
+    granted: Mapped[bool] = mapped_column(Boolean)
+    policy_version: Mapped[str] = mapped_column(String(32))
+    source: Mapped[str] = mapped_column(String(20))  # user|account_deletion|data_deletion
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class LearningEvent(Base):
+    """Content-free learning record linked to one job (no prompts, media or biometric data). Carries schema
+    version, provenance, purpose, a consent snapshot and a retention deadline (spec V5 §8)."""
+
+    __tablename__ = "learning_events"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    schema_version: Mapped[int] = mapped_column(Integer, default=1)
+    kind: Mapped[str] = mapped_column(String(16))  # job_outcome|feedback
+    job_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)
+    feature: Mapped[str] = mapped_column(String(40))
+    intent_category: Mapped[str | None] = mapped_column(String(40))
+    creative_mode: Mapped[str | None] = mapped_column(String(16))
+    provider: Mapped[str | None] = mapped_column(String(60))
+    prompt_strategy: Mapped[str | None] = mapped_column(String(40))
+    resolution: Mapped[str | None] = mapped_column(String(16))
+    duration_s: Mapped[float | None] = mapped_column(Float)
+    status: Mapped[str | None] = mapped_column(String(16))
+    success: Mapped[bool | None] = mapped_column(Boolean)
+    error_code: Mapped[str | None] = mapped_column(String(60))
+    retries: Mapped[int | None] = mapped_column(Integer)
+    latency_s: Mapped[float | None] = mapped_column(Float)
+    credits: Mapped[int | None] = mapped_column(Integer)
+    est_cost_usd: Mapped[float | None] = mapped_column(Float)
+    actual_cost_usd: Mapped[float | None] = mapped_column(Float)
+    quality: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)  # numeric QA signals only
+    rating: Mapped[int | None] = mapped_column(Integer)
+    reasons: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    regenerated: Mapped[bool] = mapped_column(Boolean, default=False)
+    consent: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    purpose: Mapped[str] = mapped_column(String(32), default="technical_improvement")
+    provenance: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    retention_until: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(),
+                                                 onupdate=func.now())
+
+    __table_args__ = (UniqueConstraint("job_id", "kind", name="uq_learning_event_job_kind"),)
+
+
+class ModelPerformanceAggregate(Base):
+    """Technical memory: daily roll-up per provider x feature x creative mode (no user identities)."""
+
+    __tablename__ = "model_performance_aggregates"
+    day: Mapped[date] = mapped_column(Date, primary_key=True)
+    provider: Mapped[str] = mapped_column(String(60), primary_key=True)
+    feature: Mapped[str] = mapped_column(String(40), primary_key=True)
+    creative_mode: Mapped[str] = mapped_column(String(16), primary_key=True)
+    jobs: Mapped[int] = mapped_column(Integer, default=0)
+    successes: Mapped[int] = mapped_column(Integer, default=0)
+    p50_latency_s: Mapped[float | None] = mapped_column(Float)
+    p95_latency_s: Mapped[float | None] = mapped_column(Float)
+    cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    ratings: Mapped[int] = mapped_column(Integer, default=0)
+    rating_mean: Mapped[float | None] = mapped_column(Float)
+    quality: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    errors: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class ShareLink(Base):
     """Server-issued share link ("Try this template"). The public token is `code.signature`; only `code`
     is stored. Links point at a template, never at a user's private output video."""

@@ -116,6 +116,14 @@ def webhook_retry(db: Session) -> dict:
     return billing.retry_failed_events(db)
 
 
+def learning_aggregate(db: Session) -> dict:
+    """V5 technical memory: roll up yesterday and today (idempotent)."""
+    from .services import learning
+
+    today = _now().date()
+    return {"groups": learning.aggregate(db, today - timedelta(days=1)) + learning.aggregate(db, today)}
+
+
 TASKS: dict[str, Callable[[Session], dict]] = {
     "template_metrics": template_metrics,
     "credit_expiry": credit_expiry,
@@ -123,6 +131,7 @@ TASKS: dict[str, Callable[[Session], dict]] = {
     "retention": retention,
     "play_finalize_retry": play_finalize_retry,
     "webhook_retry": webhook_retry,
+    "learning_aggregate": learning_aggregate,
 }
 
 

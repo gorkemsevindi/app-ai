@@ -4,7 +4,7 @@
 
 **Kullanım:** Her aşamada güncellenir. İstendiğinde bu dosya verilir.
 
-**Son güncelleme:** 2026-10-10 (Aşama E sonrası).
+**Son güncelleme:** 2026-10-10 (V5 Aşama B sonrası).
 
 **Etiketler:**
 - **[SEN]** Senin işin: anahtar, hesap, sözleşme veya ticari karar.
@@ -220,6 +220,15 @@ learning_events, prompt_strategies, model_performance_aggregates, creative_prefe
 - Sürümlü storyboard'lar ve düzenleme işlemleri.
 - Şablon sıralaması.
 - Sağlayıcı kapasite tablosu.
+
+### 5.2a V5 ilerlemesi
+- ✅ **Aşama A:** denetim ve plan (`docs/V5_AUDIT_AND_PLAN.md`).
+- ✅ **Aşama B:** öğrenme altyapısı. Her biten iş için içerik içermeyen bir kayıt tutuluyor; öğrenme rızası, kullanıcı puanı ve geri bildirim, teknik hafıza (günlük özetler) ve öğrenme paneli var.
+- **Aşama B'den kalan eksikler:**
+  - Mobilde puan verme ve öğrenme rızası ekranları yok; API hazır.
+  - Otomatik kalite ölçümleri (kimlik kayması, titreme, talimata uyum) yok.
+  - Model eğitimi için içerik saklama kapalı. Açılması için hukuk incelemesi gerekiyor. [HUKUK]
+- **Sırada:** Aşama C (prompt iyileştirici, üç yaratıcı mod, özgünlük ve benzerlik denetimi), ardından Aşama D ve E.
 
 ### 5.3 İş bitince: Master Spec güncellemesi
 Kullanıcı talebi: Tüm aşamalar bitince Master Spec güncellenecek. V3, V4 ve V5'i tek belgede birleştiren, uygulanan durumu ("uygulandı / doğrulanmadı / eksik") ve gerçek mimariyi yansıtan güncel bir master spec hazırlanacak.

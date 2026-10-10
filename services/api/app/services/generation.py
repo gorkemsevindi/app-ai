@@ -30,8 +30,10 @@ from ..models import (
     TemplateVersion,
     User,
 )
-from . import credits, moderation
+from . import credits, learning, moderation
 from .storage import get_storage
+
+_LEARNING_LISTENER = learning._capture_terminal_jobs  # importing learning registers its job-outcome flush hook
 
 ACTIVE_STATUSES = {JobStatus.preprocessing, JobStatus.generating, JobStatus.postprocessing, JobStatus.moderation}
 
