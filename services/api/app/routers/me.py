@@ -21,7 +21,7 @@ ANALYTICS_EVENT_ALLOWLIST = {
 @router.get("/me", response_model=MeOut)
 def me(user: User = Depends(current_user), db: Session = Depends(get_db)):
     out = MeOut.model_validate(user)
-    out.credits = credits.balance(db, user.id)
+    out.credits = credits.available(db, user.id)
     out.needs_consent = needs_consent(user)
     return out
 
@@ -39,8 +39,8 @@ def patch_me(body: MePatch, user: User = Depends(current_user), db: Session = De
 def get_credits(user: User = Depends(current_user), db: Session = Depends(get_db)):
     rows = db.execute(select(CreditLedger).where(CreditLedger.user_id == user.id)
                       .order_by(CreditLedger.id.desc()).limit(50)).scalars().all()
-    return CreditsOut(balance=credits.balance(db, user.id), history=[
-        {"delta": r.delta, "reason": r.reason.value, "balance_after": r.balance_after,
+    return CreditsOut(balance=credits.available(db, user.id), buckets=credits.buckets(db, user.id), history=[
+        {"delta": r.delta, "reason": r.reason.value, "ref_id": r.ref_id, "balance_after": r.balance_after,
          "created_at": r.created_at.isoformat()} for r in rows])
 
 

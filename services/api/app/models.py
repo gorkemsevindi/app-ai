@@ -276,6 +276,8 @@ class GenerationJob(TimestampMixin, Base):
     idempotency_key: Mapped[str] = mapped_column(String(80))
     credit_cost: Mapped[int] = mapped_column(Integer)
     refunded: Mapped[bool] = mapped_column(Boolean, default=False)
+    billing_state: Mapped[str | None] = mapped_column(String(12))  # reserved|settled|released (NULL: free/legacy)
+    est_cost_usd: Mapped[float | None] = mapped_column(Float)
     progress: Mapped[float] = mapped_column(Float, default=0.0)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     max_attempts: Mapped[int] = mapped_column(Integer, default=3)
@@ -460,6 +462,9 @@ class LedgerReason(str, enum.Enum):
     promo = "promo"
     admin_adjust = "admin_adjust"
     purchase_reversal = "purchase_reversal"
+    # V4 Stage A: `generation_debit` is the reservation, `refund` the release; settle confirms the charge.
+    generation_settle = "generation_settle"
+    expire = "expire"
 
 
 class CreditLedger(Base):
@@ -479,6 +484,34 @@ class CreditLedger(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (CheckConstraint("balance_after >= 0", name="ck_ledger_balance_nonneg"),)
+
+
+class CreditLot(Base):
+    """A grant of credits in one bucket with its own expiry. Immutable: what is left in a lot is
+    `granted + SUM(credit_allocations.amount)`, derived from append-only rows, never a mutable counter."""
+
+    __tablename__ = "credit_lots"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
+    bucket: Mapped[str] = mapped_column(String(20))  # promo|subscription|purchased|reward|adjustment|legacy
+    source_ledger_id: Mapped[int] = mapped_column(ForeignKey("credit_ledger.id", ondelete="RESTRICT"), unique=True)
+    granted: Mapped[int] = mapped_column(Integer)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (CheckConstraint("granted > 0", name="ck_credit_lots_granted_pos"),)
+
+
+class CreditAllocation(Base):
+    """Which lots a ledger entry consumed (negative) or returned to (positive). Append-only."""
+
+    __tablename__ = "credit_allocations"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    ledger_id: Mapped[int] = mapped_column(ForeignKey("credit_ledger.id", ondelete="RESTRICT"), index=True)
+    lot_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("credit_lots.id", ondelete="RESTRICT"), index=True)
+    amount: Mapped[int] = mapped_column(Integer)
+
+    __table_args__ = (CheckConstraint("amount <> 0", name="ck_credit_allocations_nonzero"),)
 
 
 class Report(TimestampMixin, Base):

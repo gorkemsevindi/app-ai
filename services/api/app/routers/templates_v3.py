@@ -63,7 +63,7 @@ def estimate(body: EstimateIn, user: User = Depends(current_user), db: Session =
     else:
         n = 1
         q = {"credits": t.credit_cost, "breakdown": {"base": t.credit_cost}, "confirm_required": False}
-    bal = credits.balance(db, user.id)
+    bal = credits.available(db, user.id)
     return {**q, "template_id": str(t.id), "mode": "remix" if slots else "single", "persons": n,
             "est_seconds": t.est_seconds, "balance": bal, "sufficient": bal >= q["credits"]}
 

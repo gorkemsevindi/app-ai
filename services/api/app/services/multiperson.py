@@ -22,7 +22,6 @@ from ..models import (
     JobAssignment,
     JobKind,
     JobStatus,
-    LedgerReason,
     ModerationAction,
     ProfileStatus,
     SourceVideo,
@@ -320,9 +319,8 @@ def enqueue_replace(db: Session, user: User, video: SourceVideo, pairs: list, co
     db.flush()
     for p, prof in pairs:
         db.add(JobAssignment(job_id=job.id, track_id=p.track_id, profile_id=prof.id))
-    if cost:
-        credits.apply(db, user.id, -cost, LedgerReason.generation_debit, f"gen:{job.id}",
-                      ref_type="generation_job", ref_id=str(job.id))
+    job.est_cost_usd = (extra_spec or {}).get("est_cost_usd")
+    credits.reserve(db, job)
     return job
 
 

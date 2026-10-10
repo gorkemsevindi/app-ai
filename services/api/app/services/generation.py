@@ -23,7 +23,6 @@ from ..models import (
     IdentityProfile,
     JobKind,
     JobStatus,
-    LedgerReason,
     ModelRun,
     ModerationAction,
     ProfileStatus,
@@ -76,11 +75,7 @@ def queue_class_for(user: User) -> str:
 
 
 def _refund(db: Session, job: GenerationJob, why: str) -> None:
-    if job.refunded or job.credit_cost == 0:
-        return
-    credits.apply(db, job.user_id, job.credit_cost, LedgerReason.refund, f"refund:{job.id}",
-                  ref_type="generation_job", ref_id=str(job.id), note=why)
-    job.refunded = True
+    credits.release(db, job, why)
 
 
 def _disabled_models(db: Session) -> set[str]:
@@ -160,9 +155,7 @@ def create_job(db: Session, user: User, template_id: uuid.UUID, profile_id: uuid
     )
     db.add(job)
     db.flush()
-    if tpl.credit_cost:
-        credits.apply(db, user.id, -tpl.credit_cost, LedgerReason.generation_debit, f"gen:{job.id}",
-                      ref_type="generation_job", ref_id=str(job.id))
+    credits.reserve(db, job)
     return CreateResult(job, True)
 
 
@@ -366,6 +359,7 @@ def complete(db: Session, job_id: uuid.UUID, worker_id: str, attempt: int, outpu
     job.progress = 1.0
     job.error_code = job.error_message = None
     transition(job, JobStatus.completed)
+    credits.settle(db, job)
     return job
 
 

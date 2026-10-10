@@ -214,6 +214,7 @@ class ReportIn(BaseModel):
 class CreditsOut(BaseModel):
     balance: int
     history: list[dict]
+    buckets: list[dict] = []  # V4: per-bucket remaining + next expiry (additive)
 
 
 # ---- purchases
