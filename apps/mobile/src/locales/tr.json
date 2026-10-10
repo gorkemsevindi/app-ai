@@ -192,7 +192,13 @@
     "identity_validation_failed": "Kilitlemeden önce başarısız veya eksik görünümleri düzelt.",
     "voice_cloning_disabled": "Ses klonlama kullanılamıyor.",
     "cast_unavailable": "Kadrodaki bir karakter şu anda kullanılamıyor.",
-    "immutable_trait_change": "Bu özellikler kimliği tanımlar: yeni bir ana sürüm oluştur."
+    "immutable_trait_change": "Bu özellikler kimliği tanımlar: yeni bir ana sürüm oluştur.",
+    "budget_approval_required": "Ücretli üretimden önce bir bütçe onayla.",
+    "budget_cap_exceeded": "Bu, onaylanan bütçeyi aşar.",
+    "continuity_errors": "Önce süreklilik hatalarını düzelt.",
+    "dialogue_locked": "Bu replik kilitli; önce kilidi aç.",
+    "episode_locked": "Bu bölüm onaylandı: hikâyeyi dallandır.",
+    "adults_only": "Yetişkin yapımlar yetişkinler içindir."
   },
   "remix": {
     "slots": "Kim oynasın?",
@@ -386,5 +392,140 @@
       "needs_cast": "Bu karakteri kadroya ekle.",
       "bound": "Zaten kadroda."
     }
+  },
+  "production": {
+    "title": "Yapım",
+    "question": "Hangi hikâyeyi anlatmak istersin?",
+    "slogan": "Senin hikâyen. Senin yıldızların. Senin sineman.",
+    "entry": {
+      "series": "Kendi Dizini Üret",
+      "film": "Kendi Filmini Üret",
+      "stars": "Kendi Yıldızlarını Yarat",
+      "life_story": "Kendi Hayatını, Kendi Hikâyeni Anlat"
+    },
+    "titleLabel": "Başlık",
+    "logline": "Kısa özet (bir-iki cümle)",
+    "format": "Format",
+    "episodes": "Bölüm sayısı",
+    "minutes": "Bölüm başına dakika",
+    "lengthHint": "Uzun bölümler çok sayıda kısa çekimden oluşur; 30 dakika tek seferde üretilmez.",
+    "formats": {
+      "micro": "Mikro drama (30 sn–2 dk)",
+      "short_series": "Kısa dizi (2–5 dk)",
+      "standard_episode": "Bölüm (5–10 dk)",
+      "long_episode": "Uzun bölüm (10–30 dk)",
+      "short_film": "Kısa film (5–30 dk)",
+      "feature": "Uzun film (30+ dk, parçalı)"
+    },
+    "style": "Görsel stil",
+    "styles": {
+      "photoreal": "Fotogerçekçi",
+      "cinematic": "Sinematik",
+      "cartoon_2d": "2D çizgi film",
+      "animation_3d": "3D animasyon",
+      "anime": "Anime",
+      "stylized": "Stilize",
+      "mixed": "Karma"
+    },
+    "rating": "Yaş derecesi",
+    "ratings": {
+      "general": "Genel",
+      "teen": "Genç",
+      "mature": "Yetişkin (18+)"
+    },
+    "ratingHint": {
+      "general": "Küfür yok; kurmaca çatışma serbest.",
+      "teen": "Kurmacada argo ve küfür serbest.",
+      "mature": "Yetişkin kurmaca diyalog. Bazı içerikler hiçbir derecede izinli değildir."
+    },
+    "profile": "Bütçe profili",
+    "profiles": {
+      "economy": "Ekonomi",
+      "standard": "Standart",
+      "cinema_pro": "Sinema Pro"
+    },
+    "create": "Yapımı oluştur",
+    "status": {
+      "draft": "Taslak",
+      "planned": "Planlandı",
+      "queued": "Sırada",
+      "generating": "Üretiliyor",
+      "qc": "Kalite kontrol",
+      "assembling": "Montajlanıyor",
+      "pilot_rendering": "Pilot üretiliyor",
+      "pilot_ready": "Pilot hazır",
+      "ready": "Hazır",
+      "failed": "Başarısız",
+      "partial_failed": "Bazı çekimler başarısız (yeniden üretimde yalnız onlar ücretlenir)",
+      "cancelled": "İptal edildi"
+    },
+    "script": "Senaryo",
+    "scriptHint": "İÇ. MUTFAK - GECE / KARAKTER / (fısıltıyla) / replik…",
+    "plan": "Bu bölümü planla (ücretsiz)",
+    "animatic": "Ücretsiz storyboard önizlemesi",
+    "dialogue": "Replik editörü",
+    "budget": "Bütçe",
+    "budgetUsd": "Bütçe sınırı (USD, isteğe bağlı)",
+    "estimate": "Tahmin et",
+    "estimateRange": "{{lo}}–{{hi}} kredi",
+    "infeasible": "Bu bütçe bu yapımı bu kalitede karşılamıyor. Seçenekler:",
+    "alt": {
+      "reduce_duration": "Daha kısa",
+      "economy_profile": "Ekonomi profili",
+      "less_action": "Daha az aksiyon",
+      "episode_by_episode": "Bölüm bölüm",
+      "animatic_and_pilot": "Önce animatic + pilot",
+      "increase_budget": "Bütçeyi artır"
+    },
+    "approve": "Bütçeyi onayla (kesin tavan)",
+    "capInfo": "Tavan {{cap}} kredi · kullanılan {{used}}",
+    "confirm": "{{credits}} krediyi onayla",
+    "pilot": "30–60 sn pilot üret",
+    "render": "Bölümü üret",
+    "cancel": "İptal et (bitmeyen işler iade edilir)"
+  },
+  "dialogue": {
+    "title": "Replikler",
+    "exactHint": "Aynen oku modu: sözlerin olduğu gibi kalır (yumuşatma yok). Ses/dudak senkronu henüz yok; replikler altyazı olarak oynar.",
+    "redo": "Yinele",
+    "exact": "aynen",
+    "text": "Replik",
+    "preview": "Etkisini gör",
+    "lock": "Repliği kilitle",
+    "unlock": "Kilidi aç",
+    "impact": "Etkiler: {{levels}} · {{credits}} kredi",
+    "level": {
+      "subtitles": "altyazı",
+      "voice": "ses",
+      "voice_not_available": "ses (yok)",
+      "voice_and_lip_sync": "ses + dudak senkronu",
+      "lip_sync_not_available": "dudak senkronu (yok)",
+      "shot_regeneration": "çekim yeniden üretimi",
+      "story_review": "hikâye kontrolü"
+    },
+    "delivery": {
+      "normal": "Normal",
+      "shout": "Bağırarak",
+      "whisper": "Fısıltıyla",
+      "cry": "Ağlayarak",
+      "sarcastic": "Alaycı",
+      "angry": "Öfkeli",
+      "calm": "Sakin"
+    }
+  },
+  "life": {
+    "private": "Varsayılan olarak özeldir. Sen seçmedikçe hiçbir şey paylaşılmaz.",
+    "q": {
+      "childhood": "Nerede ve nasıl büyüdün?",
+      "turning_points": "Hangi anlar hayatını değiştirdi?",
+      "people": "Önemli kişiler kimlerdi?",
+      "places": "Hangi mekânlar önemli?",
+      "feelings": "Ne hissettin?",
+      "ending": "Hikâye nasıl bitsin?"
+    },
+    "draft": "Zaman çizelgesi + mahremiyet kontrolü oluştur",
+    "people": "Adı geçen kişiler: {{names}}",
+    "confirm": "Mahremiyet kontrolünü inceledim; gerçek kişiler anonim ya da onaylı.",
+    "approve": "Hikâyemi oluştur"
   }
 }

@@ -48,10 +48,56 @@ def normalize(src: Path, dst: Path, w: int, h: int, dur_s: float, fade: bool, fp
     return dst
 
 
-def assemble(shots: list[tuple[Path, dict]], spec: dict, workdir: Path, music: Path | None) -> tuple[Path, Path | None]:
+FONTS = ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/truetype/freefont/FreeSans.ttf")
+
+
+def _wrap(text: str, width: int) -> list[str]:
+    words, lines, cur = text.split(), [], ""
+    for wd in words:
+        if cur and len(cur) + len(wd) + 1 > width:
+            lines.append(cur)
+            cur = wd
+        else:
+            cur = f"{cur} {wd}".strip()
+    return [*lines, cur] if cur else lines
+
+
+def card_clip(card: dict, dst: Path, w: int, h: int, dur_s: float) -> Path:
+    """V7 animatic: a storyboard title card (scene heading, shot description, camera) as a silent clip, drawn by
+    ffmpeg drawtext from text files (Unicode-safe, no shell escaping). Clearly marked as a storyboard preview."""
+    font = next((f for f in FONTS if Path(f).exists()), None)
+    blocks = [("STORYBOARD PREVIEW", max(14, w // 30), "0xE8453C", 24)]
+    y = 24 + w // 12
+    for ln in _wrap(card.get("title") or "", 26)[:3]:
+        blocks.append((ln, max(18, w // 22), "white", y))
+        y += w // 16
+    y += w // 30
+    for ln in _wrap(card.get("text") or "", 38)[:14]:
+        blocks.append((ln, max(14, w // 32), "0xDCDCE4", y))
+        y += w // 22
+    if card.get("camera"):
+        blocks.append((f"Camera: {card['camera']}"[:60], max(12, w // 36), "0xA0A0AA", h - w // 8))
+    filters = []
+    for k, (text, size, color, yy) in enumerate(blocks):
+        tf = dst.parent / f"{dst.stem}_t{k}.txt"
+        tf.write_text(text, encoding="utf-8")
+        ff = f"fontfile={font}:" if font else ""
+        filters.append(f"drawtext={ff}textfile={tf}:fontsize={size}:fontcolor={color}:x=24:y={yy}")
+    vf = ",".join(filters + ["format=yuv420p"])
+    _run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", f"color=c=0x12121A:s={w}x{h}:r=24",
+          "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-t", f"{dur_s:.3f}", "-vf", vf, "-c:v", "libx264",
+          "-preset", "veryfast", "-crf", "24", "-c:a", "aac", "-ar", "48000", "-ac", "2", "-shortest", str(dst)])
+    return dst
+
+
+def assemble(shots: list[tuple[Path | None, dict]], spec: dict, workdir: Path, music: Path | None
+             ) -> tuple[Path, Path | None]:
     w, h = (int(x) for x in spec["resolution"].split("x"))
     parts = []
     for i, (path, s) in enumerate(shots):
+        if path is None:  # animatic card (no AI generation)
+            parts.append(card_clip(s.get("card") or {}, workdir / f"n{i:02d}.mp4", w, h, s["duration_ms"] / 1000))
+            continue
         parts.append(normalize(path, workdir / f"n{i:02d}.mp4", w, h, s["duration_ms"] / 1000,
                                fade=s.get("transition") == "fade" and i > 0,
                                start_s=s.get("trim_start_ms", 0) / 1000))

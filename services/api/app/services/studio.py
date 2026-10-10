@@ -22,7 +22,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, model_serializer
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -87,10 +87,38 @@ def require_enabled(db: Session) -> dict:
 
 # ---------------------------------------------------------------- storyboard schema
 
+def _drop_unset(data: dict, fields: tuple[str, ...]) -> dict:
+    """V7 fields are optional and omitted when unset, so pre-V7 storyboards serialize exactly as before."""
+    return {k: v for k, v in data.items() if not (k in fields and v in (None, False, 0, [], {}))}
+
+
+V7_DIALOGUE_FIELDS = ("id", "end_s", "language", "emotion", "delivery", "intensity", "pronunciation", "voice_id",
+                      "locked", "exact", "rev", "variant_of")
+
+
 class Dialogue(BaseModel):
     character: str | None = Field(default=None, pattern=KEY_RE)
-    text: str = Field(min_length=1, max_length=300)
+    text: str = Field(min_length=1, max_length=600)
     start_s: float = Field(default=0.0, ge=0)
+    # V7 Exact Dialogue Mode: a persistent line with performance controls. `exact` = the text is the user's
+    # literal words (never smoothed, paraphrased or rewritten); `locked` = edits need an explicit unlock.
+    id: str | None = Field(default=None, pattern=r"^[a-z0-9_-]{1,40}$")
+    end_s: float | None = Field(default=None, ge=0)
+    language: str | None = Field(default=None, max_length=8)
+    emotion: str | None = Field(default=None, max_length=40)
+    delivery: Literal["normal", "shout", "whisper", "cry", "sarcastic", "laugh", "angry", "calm", "mock"] | None \
+        = None
+    intensity: float | None = Field(default=None, ge=0, le=1)
+    pronunciation: str | None = Field(default=None, max_length=200)
+    voice_id: str | None = Field(default=None, max_length=120)
+    locked: bool = False
+    exact: bool = False
+    rev: int = Field(default=0, ge=0)
+    variant_of: str | None = Field(default=None, pattern=r"^[a-z0-9_-]{1,40}$")  # A/B variant of another line
+
+    @model_serializer(mode="wrap")
+    def _ser(self, handler):
+        return _drop_unset(handler(self), V7_DIALOGUE_FIELDS)
 
 
 class Derive(BaseModel):
@@ -117,10 +145,26 @@ class Shot(BaseModel):
     optimized_prompt: str | None = Field(default=None, max_length=1500)  # V5: derived; `prompt` is the original
 
 
+VISUAL_STYLES = ("photoreal", "cinematic", "cartoon_2d", "animation_3d", "anime", "stylized", "mixed")
+SCENE_TYPES = ("dialogue", "action", "landscape", "montage", "transition", "animation")
+V7_SCENE_FIELDS = ("visual_style", "scene_type", "location", "time_of_day", "characters_present")
+
+
 class Scene(BaseModel):
     key: str = Field(pattern=KEY_RE)
     title: str = Field(default="", max_length=120)
-    shots: list[Shot] = Field(min_length=1, max_length=20)
+    shots: list[Shot] = Field(min_length=1, max_length=40)  # V7: long episodes (limits enforced per project)
+    # V7: per-scene style override, scene class (capability/cost matrix) and continuity context
+    visual_style: Literal["photoreal", "cinematic", "cartoon_2d", "animation_3d", "anime", "stylized", "mixed"] | None \
+        = None
+    scene_type: Literal["dialogue", "action", "landscape", "montage", "transition", "animation"] | None = None
+    location: str | None = Field(default=None, max_length=120)
+    time_of_day: str | None = Field(default=None, max_length=40)
+    characters_present: list[str] = Field(default_factory=list, max_length=12)
+
+    @model_serializer(mode="wrap")
+    def _ser(self, handler):
+        return _drop_unset(handler(self), V7_SCENE_FIELDS)
 
 
 class CharacterRef(BaseModel):
@@ -149,7 +193,7 @@ class Storyboard(BaseModel):
     style: str = Field(default="", max_length=300)
     quality: Literal["standard", "premium"] = "standard"
     characters: list[CharacterRef] = Field(default_factory=list, max_length=8)
-    scenes: list[Scene] = Field(min_length=1, max_length=20)
+    scenes: list[Scene] = Field(min_length=1, max_length=80)
     audio: AudioCfg = Field(default_factory=AudioCfg)
     captions: Captions = Field(default_factory=Captions)
     limitations: list[str] = Field(default_factory=list, max_length=20)
@@ -158,9 +202,18 @@ class Storyboard(BaseModel):
     composition: str | None = Field(default=None, max_length=40)
     seed: int | None = Field(default=None, ge=0)
     prompt_strategy: str | None = Field(default=None, max_length=40)
+    visual_style: Literal["photoreal", "cinematic", "cartoon_2d", "animation_3d", "anime", "stylized", "mixed"] | None \
+        = None  # V7 production default style (scenes may override)
+
+    @model_serializer(mode="wrap")
+    def _ser(self, handler):
+        return _drop_unset(handler(self), ("visual_style",))
 
     def shots(self) -> list[Shot]:
         return [s for sc in self.scenes for s in sc.shots]
+
+    def scene_of(self) -> dict[str, Scene]:
+        return {s.key: sc for sc in self.scenes for s in sc.shots}
 
 
 class Brief(BaseModel):
@@ -291,8 +344,27 @@ def _check_text(text: str | None) -> None:
         raise ApiError(422, "content_blocked", "this text is not allowed", {"category": d.category})
 
 
-def validate_storyboard(db: Session, user: User, raw: dict, cfg: dict) -> Storyboard:
+def _text_checker(project: StudioProject | None):
+    """V7: fictional productions use the fiction policy (slang/swearing allowed per rating); else the default."""
+    pol = (project.content_policy or {}) if project is not None else {}
+    if not pol.get("fiction"):
+        return lambda text, kind="dialogue": _check_text(text)
+    rating = pol.get("rating", "general")
+
+    def check(text, kind="dialogue"):
+        d = moderation.check_fiction(text, rating, kind)
+        if not d.allowed:
+            raise ApiError(422, "content_blocked", "this text is not allowed in this production",
+                           {"category": d.category, "flags": d.reasons, "rating": rating})
+    return check
+
+
+def validate_storyboard(db: Session, user: User, raw: dict, cfg: dict, project: StudioProject | None = None
+                        ) -> Storyboard:
     from . import creative
+
+    if project is not None and project.limits:  # V7: long episodes carry their own format limits
+        cfg = {**cfg, **{k: v for k, v in project.limits.items() if k in ("max_shots", "max_total_s")}}
 
     if isinstance(raw, dict) and raw.get("creative_mode") is not None and isinstance(raw.get("scenes"), list):
         import copy
@@ -331,9 +403,19 @@ def validate_storyboard(db: Session, user: User, raw: dict, cfg: dict) -> Storyb
         for d in s.dialogue:
             if d.start_s >= s.duration_s:
                 raise ApiError(422, "bad_storyboard", f"dialogue in {s.key} starts after the shot ends")
+    check = _text_checker(project)
     for text in [sb.title, sb.style] + [c.name for c in sb.characters] + [c.description for c in sb.characters] + \
-            [t for s in shots for t in [s.prompt, s.camera, s.caption] + [d.text for d in s.dialogue]]:
-        _check_text(text)
+            [t for s in shots for t in [s.prompt, s.camera]]:
+        check(text, "visual")
+    for text in [t for s in shots for t in [s.caption] + [d.text for d in s.dialogue]]:
+        check(text, "dialogue")
+    line_ids = [d.id for s in shots for d in s.dialogue if d.id]
+    if len(line_ids) != len(set(line_ids)):
+        raise ApiError(422, "bad_storyboard", "dialogue line ids must be unique")
+    for s in shots:
+        for d in s.dialogue:
+            if d.end_s is not None and not d.start_s <= d.end_s <= s.duration_s:
+                raise ApiError(422, "bad_storyboard", f"dialogue in {s.key} must end inside the shot")
     texts_all = [sb.title, sb.style] + [t for s in shots for t in [s.prompt, s.camera, s.caption] +
                                         [d.text for d in s.dialogue]]
     for c in sb.characters:
@@ -377,9 +459,38 @@ def validate_storyboard(db: Session, user: User, raw: dict, cfg: dict) -> Storyb
     return sb
 
 
+def dialogue_lines(storyboard: dict) -> dict[str, dict]:
+    """line id -> {line, shot, scene} for every identified dialogue line."""
+    out = {}
+    for sc in storyboard.get("scenes", []):
+        for sh in sc.get("shots", []):
+            for d in sh.get("dialogue", []):
+                if d.get("id"):
+                    out[d["id"]] = {"line": d, "shot": sh["key"], "scene": sc["key"]}
+    return out
+
+
+def check_locked_lines(before: dict, after: dict) -> None:
+    old, new = dialogue_lines(before), dialogue_lines(after)
+    for lid, o in old.items():
+        if not o["line"].get("locked"):
+            continue
+        n = new.get(lid)
+        if n is None or n["line"].get("text") != o["line"]["text"] or \
+                n["line"].get("character") != o["line"].get("character"):
+            if n is not None and not n["line"].get("locked") and n["line"].get("text") == o["line"]["text"]:
+                continue  # this edit only unlocks the line
+            raise ApiError(409, "dialogue_locked",
+                           "a locked dialogue line can't be changed or removed; unlock it first", {"line_id": lid})
+
+
 def add_version(db: Session, user: User, project: StudioProject, sb: Storyboard, source: str, brief: dict,
                 director: dict, parent: uuid.UUID | None, creative: dict | None = None,
                 make_current: bool = True) -> StudioProjectVersion:
+    if source == "edit" and parent is not None:  # V7: locked dialogue lines change only after an explicit unlock
+        prev = db.get(StudioProjectVersion, parent)
+        if prev is not None:
+            check_locked_lines(prev.storyboard, sb.model_dump(mode="json"))
     n = db.execute(select(func.coalesce(func.max(StudioProjectVersion.version), 0))
                    .where(StudioProjectVersion.project_id == project.id)).scalar_one()
     v = StudioProjectVersion(project_id=project.id, version=n + 1, parent_version_id=parent, source=source,
@@ -599,7 +710,7 @@ def plan_candidates(db: Session, user: User, project: StudioProject, brief: Brie
         if not isinstance(d, RuleBasedDirector):
             raw.update({"creative_mode": brief.creative_mode, "composition": comp, "seed": cseed})
         try:
-            sb = validate_storyboard(db, user, raw, cfg)
+            sb = validate_storyboard(db, user, raw, cfg, project)
         except ApiError as e:
             if e.code == "content_blocked":
                 raise
@@ -645,6 +756,10 @@ def _shot_inputs(db: Session, sb: Storyboard, shot: Shot, provider: str) -> dict
                 "aspect_ratio": sb.aspect_ratio, "provider": provider, "characters": refs}
     out = {"prompt": shot.prompt, "camera": shot.camera, "duration_s": shot.duration_s, "style": sb.style,
            "aspect_ratio": sb.aspect_ratio, "quality": sb.quality, "provider": provider, "characters": refs}
+    scene = sb.scene_of().get(shot.key)
+    vstyle = (scene.visual_style if scene is not None else None) or sb.visual_style
+    if vstyle:  # V7 visual style (production default or scene override): changes pixels -> hashed
+        out["visual_style"] = vstyle
     if shot.optimized_prompt is not None:  # V5: the derived prompt changes pixels -> part of the hash
         out["optimized_prompt"] = shot.optimized_prompt
         out["creative"] = {"mode": sb.creative_mode, "strategy": sb.prompt_strategy, "seed": sb.seed}
@@ -667,6 +782,8 @@ def needed_capabilities(inputs: dict) -> set[str]:
         caps.add("VIDEO_EXTEND" if inputs["extend"]["direction"] == "end" else "VIDEO_PREPEND")
     if any(c["identity_profile_id"] or c.get("cast") for c in inputs["characters"]):
         caps.add("CHARACTER_REFERENCE")
+    if inputs.get("visual_style"):  # V7 capability matrix: the provider must declare the style
+        caps.add("STYLE_" + inputs["visual_style"].upper())
     return caps
 
 
@@ -699,6 +816,8 @@ def estimate_storyboard(db: Session, user: User, project: StudioProject, storybo
     renders = {r.content_hash: r for r in db.execute(select(StudioShotRender).where(
         StudioShotRender.project_id == project.id)).scalars()}
     rows, new_credits, new_usd, missing, blocked, parents = [], 0, 0.0, set(), [], []
+    scenes = sb.scene_of()
+    type_mult = cfg.get("scene_type_credit_multiplier") or {}
     for shot in sb.shots():
         inp = _shot_inputs(db, sb, shot, provider)
         h = shot_hash(inp)
@@ -711,6 +830,9 @@ def estimate_storyboard(db: Session, user: User, project: StudioProject, storybo
             if shot.derive.kind == "trim":
                 state = "derived"
         credits_ = 0 if state == "derived" else int(math.ceil(cps * shot.duration_s))
+        st = scenes[shot.key].scene_type
+        if st and state != "derived" and float(type_mult.get(st, 1.0)) != 1.0:  # V7 scene-class cost matrix
+            credits_ = int(math.ceil(credits_ * float(type_mult[st])))
         usd = round(usd_ps * shot.duration_s, 4) if usd_ps is not None else None
         lack = needed_capabilities(inp) - caps
         missing |= lack
@@ -779,17 +901,23 @@ def _job_key(prefix: str, *parts: str) -> str:
 
 
 def render(db: Session, user: User, project: StudioProject, version_id: uuid.UUID | None,
-           confirmed_credits: int | None, idempotency_key: str) -> dict:
+           confirmed_credits: int | None, idempotency_key: str, only_keys: list[str] | None = None,
+           purpose: str = "full") -> dict:
+    """purpose=full renders every new shot and assembles; purpose=pilot (V7 preview-first) renders only
+    `only_keys` — the renders are content-hashed, so the full render later reuses them at no cost."""
     cfg = require_enabled(db)
     v = get_version(db, project, version_id)
     sb0 = Storyboard.model_validate(v.storyboard)
-    keys = [_job_key("st", idempotency_key, shot_hash(_shot_inputs(db, sb0, s, ""))) for s in sb0.shots()]
+    keys = [_job_key("st", idempotency_key, shot_hash(_shot_inputs(db, sb0, s, ""))) for s in sb0.shots()
+            if only_keys is None or s.key in only_keys]
     replay = db.execute(select(GenerationJob).where(GenerationJob.user_id == user.id,
                                                     GenerationJob.idempotency_key.in_(keys))).scalars().all()
     if replay:  # same Idempotency-Key retried: return what that request created, charge nothing new
         return {"project_id": str(project.id), "version_id": str(v.id), "credits": sum(j.credit_cost for j in replay),
                 "jobs": [str(j.id) for j in replay], "status": project.status, "replay": True}
     est = estimate(db, user, project, v)
+    if only_keys is not None:
+        est = subset_estimate(est, only_keys)
     if est["blocked"]:
         if all(b["reason"] == "consent_missing" for b in est["blocked"]):
             raise ApiError(409, "consent_required", "a character's likeness consent is missing or revoked",
@@ -821,8 +949,8 @@ def render(db: Session, user: User, project: StudioProject, version_id: uuid.UUI
     by_key = {r["key"]: r for r in est["shots"]}
     created = []
     for shot in sb.shots():
-        row = by_key[shot.key]
-        if row["status"] != "new":
+        row = by_key.get(shot.key)
+        if row is None or row["status"] != "new":
             continue
         inp = _shot_inputs(db, sb, shot, provider)
         key = _job_key("st", idempotency_key, row["hash"])
@@ -869,12 +997,29 @@ def render(db: Session, user: User, project: StudioProject, version_id: uuid.UUI
 
             character_market.reserve_usage(db, job, spec["character_usage"])
         created.append(job)
-    project.rendered_version_id = v.id
-    project.status = "rendering"
+    if purpose == "full":
+        project.rendered_version_id = v.id
+        project.status = "rendering"
+        db.flush()
+        maybe_assemble(db, project)
     db.flush()
-    maybe_assemble(db, project)
     return {"project_id": str(project.id), "version_id": str(v.id), "credits": est["credits"],
-            "jobs": [str(j.id) for j in created], "status": project.status}
+            "jobs": [str(j.id) for j in created], "status": project.status, "purpose": purpose}
+
+
+def subset_estimate(est: dict, only_keys: list[str]) -> dict:
+    """The estimate restricted to some shots (pilot sequence): no assembly charge, same per-shot prices."""
+    rows = [r for r in est["shots"] if r["key"] in only_keys]
+    if len(rows) != len(set(only_keys)):
+        raise ApiError(422, "unknown_shots", "some shots are not in this version")
+    new = [r for r in rows if r["status"] == "new"]
+    usd = [r["est_cost_usd"] for r in new]
+    return {**est, "shots": rows, "credits": sum(r["credits"] for r in new), "new_shots": len(new),
+            "reused_shots": len(rows) - len(new), "assemble_credits": 0,
+            "est_cost_usd": round(sum(usd), 4) if all(u is not None for u in usd) else None,
+            "blocked": [b for b in est["blocked"] if b["shot"] in only_keys],
+            "missing_sources": [m for m in est["missing_sources"] if m["shot"] in only_keys],
+            "within_budget": True}
 
 
 def _version_renders(db: Session, project: StudioProject, v: StudioProjectVersion
@@ -962,6 +1107,65 @@ def maybe_assemble(db: Session, project: StudioProject) -> GenerationJob | None:
     return job
 
 
+def assemble_preview(db: Session, user: User, project: StudioProject, v: StudioProjectVersion, purpose: str,
+                     only_keys: list[str] | None = None) -> GenerationJob:
+    """V7 preview-first. `animatic`: free storyboard preview (title cards with the scene/shot text and exact
+    subtitles, no AI generation; labelled preview quality). `pilot`: assembles the selected rendered shots
+    (30-60 s pilot sequence). Neither changes the project's final output."""
+    sb = Storyboard.model_validate(v.storyboard)
+    shots = [s for s in sb.shots() if only_keys is None or s.key in only_keys]
+    if not shots:
+        raise ApiError(422, "unknown_shots", "no shots selected")
+    renders = {}
+    if purpose == "pilot":
+        pairs = {s.key: r for s, r in _version_renders(db, project, v)}
+        missing = [s.key for s in shots if pairs.get(s.key) is None or pairs[s.key].status != "ready"]
+        if missing:
+            raise ApiError(409, "shots_not_ready", "render the pilot shots first", {"shots": missing})
+        renders = pairs
+    scenes = sb.scene_of()
+    names = {c.key: c.name for c in sb.characters}
+    timeline, captions, t = [], [], 0
+    for shot in shots:
+        item = {"shot_key": shot.key, "duration_ms": shot.duration_s * 1000, "transition": shot.transition,
+                "start_ms": t, "trim_start_ms": 0}
+        if purpose == "pilot":
+            r = renders[shot.key]
+            trim = shot.derive.start_s if shot.derive is not None and shot.derive.kind == "trim" else 0
+            item.update(video_key=r.video_key, trim_start_ms=trim * 1000)
+        else:
+            sc = scenes[shot.key]
+            item["card"] = {"title": " · ".join(x for x in [sc.title, sc.location, sc.time_of_day] if x)[:120],
+                            "text": shot.prompt[:400], "camera": shot.camera[:120]}
+        timeline.append(item)
+        lines = [(d.start_s, (f"{names.get(d.character, d.character)}: " if d.character else "") + d.text)
+                 for d in shot.dialogue] or ([(0.0, shot.caption)] if shot.caption else [])
+        for i, (start, text) in enumerate(lines):
+            end = lines[i + 1][0] if i + 1 < len(lines) else shot.duration_s
+            captions.append({"start_ms": t + int(start * 1000), "end_ms": t + int(end * 1000), "text": text})
+        t += shot.duration_s * 1000
+    key = _job_key("sp", purpose, str(v.id), ",".join(s.key for s in shots))
+    job = db.execute(select(GenerationJob).where(GenerationJob.user_id == project.user_id,
+                                                 GenerationJob.idempotency_key == key)).scalar_one_or_none()
+    if job is not None and job.status not in (JobStatus.failed, JobStatus.cancelled):
+        return job
+    if job is not None:
+        key = _job_key("sp", purpose, str(v.id), ",".join(s.key for s in shots), uuid.uuid4().hex)
+    job = GenerationJob(
+        id=uuid.uuid4(), user_id=project.user_id, kind=JobKind.studio_assemble, status=JobStatus.queued,
+        queue_class="paid_high" if user.plan == "pro" else "free", studio_project_id=project.id,
+        preferred_model="studio_assembler", idempotency_key=key, credit_cost=0,
+        max_attempts=get_settings().job_max_attempts, watermark=True, est_cost_usd=0.0,
+        spec={"project_version_id": str(v.id), "timeline": timeline, "captions": captions, "burn_in": True,
+              "audio": sb.audio.model_dump(mode="json") if purpose == "pilot" else {"music_asset_id": None},
+              "resolution": RESOLUTIONS[sb.aspect_ratio], "title": sb.title, "purpose": purpose,
+              "label": "preview quality (storyboard cards, not AI video)" if purpose == "animatic"
+              else "pilot sequence"})
+    db.add(job)
+    db.flush()
+    return job
+
+
 def on_job_completed(db: Session, job: GenerationJob, video_key: str, duration_ms: int) -> None:
     project = db.get(StudioProject, job.studio_project_id)
     if project is None:
@@ -974,8 +1178,14 @@ def on_job_completed(db: Session, job: GenerationJob, video_key: str, duration_m
             r.status, r.video_key, r.duration_ms = "ready", video_key, duration_ms
             db.flush()
         maybe_assemble(db, project)
+    elif job.kind == JobKind.studio_assemble and job.spec.get("purpose") in ("pilot", "animatic"):
+        pass  # previews never replace the project's final output
     elif job.kind == JobKind.studio_assemble and job.spec.get("project_version_id") == str(project.rendered_version_id):
         project.status, project.output_job_id = "ready", job.id
+    if project.production_episode_id is not None:  # V7: production progress, events, budget tracking
+        from . import productions
+
+        productions.on_episode_job(db, project, job, "completed")
 
 
 def identity_gate(db: Session, job: GenerationJob, metrics: dict) -> str | None:
@@ -1080,7 +1290,12 @@ def on_job_failed(db: Session, job: GenerationJob) -> None:
                        ).scalar_one_or_none()
         if r is not None and r.job_id == job.id:
             r.status = "failed"
-    project.status = "failed"  # partial: re-rendering only charges the failed shots
+    if job.spec.get("purpose") not in ("pilot", "animatic"):
+        project.status = "failed"  # partial: re-rendering only charges the failed shots
+    if project.production_episode_id is not None:
+        from . import productions
+
+        productions.on_episode_job(db, project, job, "failed")
 
 
 # ---------------------------------------------------------------- worker payloads
@@ -1152,7 +1367,8 @@ def build_payload(db: Session, job: GenerationJob) -> dict:
             actors.log_usage(db, ch.actor_license_id, job.id, "publish", reason)
             if reason:
                 raise DispatchRefused("license_invalid")
-    base["shots"] = [{**s, "url": st.presign_get(s["video_key"], 3600)} for s in job.spec["timeline"]]
+    base["shots"] = [{**s, "url": st.presign_get(s["video_key"], 3600) if s.get("video_key") else None}
+                     for s in job.spec["timeline"]]
     music_id = (job.spec.get("audio") or {}).get("music_asset_id")
     if music_id:
         a = db.get(AudioAsset, uuid.UUID(music_id))

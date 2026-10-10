@@ -122,7 +122,7 @@ def save_version(project_id: uuid.UUID, body: VersionIn, user: User = Depends(cu
     cfg = studio.require_enabled(db)
     p = studio.get_project(db, user, project_id)
     parent = studio.get_version(db, p, body.parent_version_id) if body.parent_version_id else None
-    sb = studio.validate_storyboard(db, user, body.storyboard, cfg)
+    sb = studio.validate_storyboard(db, user, body.storyboard, cfg, p)
     v = studio.add_version(db, user, p, sb, "edit", {}, parent.director if parent else {},
                            parent.id if parent else p.current_version_id)
     est = studio.estimate(db, user, p, v)
@@ -146,7 +146,7 @@ def restore(project_id: uuid.UUID, version_id: uuid.UUID, user: User = Depends(c
     cfg = studio.require_enabled(db)
     p = studio.get_project(db, user, project_id)
     old = studio.get_version(db, p, version_id)
-    sb = studio.validate_storyboard(db, user, old.storyboard, cfg)  # consent/assets re-checked on restore
+    sb = studio.validate_storyboard(db, user, old.storyboard, cfg, p)  # consent/assets re-checked on restore
     v = studio.add_version(db, user, p, sb, "restore", old.brief, old.director, old.id)
     est = studio.estimate(db, user, p, v)
     db.commit()
@@ -351,6 +351,17 @@ def undo(project_id: uuid.UUID, user: User = Depends(current_user), db: Session 
 
     p = studio.get_project(db, user, project_id)
     v = studio_edits.undo(db, user, p)
+    est = studio.estimate(db, user, p, v)
+    db.commit()
+    return {"version_id": str(v.id), "version": v.version, "estimate": est}
+
+
+@router.post("/projects/{project_id}/redo", status_code=201)
+def redo(project_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from ..services import studio_edits
+
+    p = studio.get_project(db, user, project_id)
+    v = studio_edits.redo(db, user, p)
     est = studio.estimate(db, user, p, v)
     db.commit()
     return {"version_id": str(v.id), "version": v.version, "estimate": est}

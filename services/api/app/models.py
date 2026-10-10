@@ -535,6 +535,10 @@ class StudioProject(TimestampMixin, Base):
     output_job_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     budget_credits: Mapped[int | None] = mapped_column(Integer)  # per-project cost cap chosen by the user
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # V7: an episode of a production. Limits (long episodes) and the fiction content policy come from it.
+    production_episode_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), index=True)
+    limits: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, server_default="{}")
+    content_policy: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, server_default="{}")
 
 
 class StudioProjectVersion(Base):
@@ -1324,3 +1328,177 @@ class CharacterUsageEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (UniqueConstraint("job_id", "character_id", name="uq_character_usage_job"),)
+
+
+# ---------------------------------------------------------------- V7 AI cinema & short drama factory
+
+class Production(TimestampMixin, Base):
+    """A series, film, "create your stars" or life-story production. One shared infrastructure: every episode is
+    a Studio project, so rendering, hashing, edits, identity lock and billing are the existing ones."""
+
+    __tablename__ = "productions"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    owner_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(12))  # series|film|stars|life_story
+    title: Mapped[str] = mapped_column(String(120))
+    logline: Mapped[str] = mapped_column(String(600), default="")
+    genre: Mapped[str] = mapped_column(String(40), default="drama")
+    audience: Mapped[str] = mapped_column(String(40), default="adult")
+    # micro|short_series|standard_episode|long_episode|short_film|feature
+    format: Mapped[str] = mapped_column(String(20))
+    visual_style: Mapped[str] = mapped_column(String(20), default="cinematic")
+    language: Mapped[str] = mapped_column(String(8), default="tr")
+    aspect_ratio: Mapped[str] = mapped_column(String(8), default="16:9")
+    content_rating: Mapped[str] = mapped_column(String(10), default="general")  # general|teen|mature
+    profile: Mapped[str] = mapped_column(String(12), default="standard")  # economy|standard|cinema_pro
+    status: Mapped[str] = mapped_column(String(16), default="draft")
+    active_branch_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    cast: Mapped[list[Any]] = mapped_column(JSONB, default=list)  # [{character_id, alias, lock_mode}]
+    settings: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    people_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)  # life stories: people/consent check
+    visibility: Mapped[str] = mapped_column(String(10), default="private")  # private (publishing is opt-in)
+    policy_version: Mapped[str] = mapped_column(String(20), default="v7-fiction-1")
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class StoryBranch(Base):
+    """Story versions: "don't let her die in episode 4" forks a new branch from episode 4. Earlier episodes are
+    shared with the parent branch; nothing is overwritten."""
+
+    __tablename__ = "story_branches"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    production_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("productions.id", ondelete="CASCADE"), index=True)
+    parent_branch_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    fork_episode: Mapped[int | None] = mapped_column(Integer)  # first episode number that differs
+    name: Mapped[str] = mapped_column(String(60))
+    reason: Mapped[str] = mapped_column(String(300), default="")
+    created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ProductionEpisode(TimestampMixin, Base):
+    __tablename__ = "production_episodes"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    production_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("productions.id", ondelete="CASCADE"), index=True)
+    branch_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("story_branches.id", ondelete="CASCADE"), index=True)
+    season: Mapped[int] = mapped_column(Integer, default=1)
+    number: Mapped[int] = mapped_column(Integer)
+    title: Mapped[str] = mapped_column(String(120))
+    synopsis: Mapped[str] = mapped_column(String(2000), default="")
+    target_duration_s: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(16), default="draft")
+    studio_project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    script: Mapped[str | None] = mapped_column(Text)  # the user's screenplay, kept verbatim
+    events: Mapped[list[Any]] = mapped_column(JSONB, default=list)  # declared story events (continuity)
+    plan_report: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    animatic_job_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    pilot_job_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    pilot_keys: Mapped[list[Any]] = mapped_column(JSONB, default=list)
+
+    __table_args__ = (UniqueConstraint("branch_id", "season", "number", name="uq_episode_branch_number"),)
+
+
+class StoryBible(Base):
+    """Versioned project bible (world, characters, relationships, locations, props, wardrobe, mysteries, rules)."""
+
+    __tablename__ = "story_bibles"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    production_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("productions.id", ondelete="CASCADE"), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    data: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (UniqueConstraint("production_id", "version", name="uq_story_bible_version"),)
+
+
+class EpisodeSnapshot(Base):
+    """Immutable canonical world state after an approved episode (+ the deltas it introduced)."""
+
+    __tablename__ = "episode_snapshots"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    episode_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("production_episodes.id", ondelete="CASCADE"),
+                                                  index=True)
+    branch_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    number: Mapped[int] = mapped_column(Integer)
+    studio_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    bible_version: Mapped[int | None] = mapped_column(Integer)
+    events: Mapped[list[Any]] = mapped_column(JSONB, default=list)
+    state: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ContinuityFinding(Base):
+    __tablename__ = "continuity_findings"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    episode_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    studio_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    severity: Mapped[str] = mapped_column(String(10))  # error|warning|info
+    code: Mapped[str] = mapped_column(String(40))
+    message: Mapped[str] = mapped_column(String(400))
+    details: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CostEstimate(Base):
+    """Estimate snapshot (estimate != quote != actual). Money in credits and currency minor units."""
+
+    __tablename__ = "cost_estimates"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    production_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("productions.id", ondelete="CASCADE"), index=True)
+    scope: Mapped[dict[str, Any]] = mapped_column(JSONB)  # {episodes: [...], purpose}
+    profile: Mapped[str] = mapped_column(String(12))
+    profile_version: Mapped[int] = mapped_column(Integer)
+    credits_low: Mapped[int] = mapped_column(Integer)
+    credits_high: Mapped[int] = mapped_column(Integer)
+    currency: Mapped[str | None] = mapped_column(String(3))
+    amount_low_minor: Mapped[int | None] = mapped_column(BigInteger)
+    amount_high_minor: Mapped[int | None] = mapped_column(BigInteger)
+    provider_usd_low: Mapped[float | None] = mapped_column(Float)
+    provider_usd_high: Mapped[float | None] = mapped_column(Float)
+    feasible: Mapped[bool | None] = mapped_column(Boolean)
+    data: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class BudgetAuthorization(Base):
+    """The user's explicit approval: a hard cap (credits) for paid production work. Overruns need a new one."""
+
+    __tablename__ = "budget_authorizations"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    production_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("productions.id", ondelete="CASCADE"), index=True)
+    estimate_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    cap_credits: Mapped[int] = mapped_column(Integer)
+    currency: Mapped[str | None] = mapped_column(String(3))
+    cap_minor: Mapped[int | None] = mapped_column(BigInteger)
+    status: Mapped[str] = mapped_column(String(12), default="active")  # active|superseded|revoked
+    idempotency_key: Mapped[str] = mapped_column(String(160), unique=True)
+    created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ProductionEvent(Base):
+    """Transactional outbox: written in the same transaction as the change it describes."""
+
+    __tablename__ = "production_events"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    production_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    type: Mapped[str] = mapped_column(String(40))
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class LifeStorySession(TimestampMixin, Base):
+    """Guided "Your life, your story" interview: private by default, privacy scan, fact/fiction marking, approval."""
+
+    __tablename__ = "life_story_sessions"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    answers: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    chronology: Mapped[list[Any]] = mapped_column(JSONB, default=list)
+    privacy: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    production_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

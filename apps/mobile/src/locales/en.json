@@ -192,7 +192,13 @@
     "identity_validation_failed": "Fix failed or missing views before locking.",
     "voice_cloning_disabled": "Voice cloning is not available.",
     "cast_unavailable": "A cast character can't be used right now.",
-    "immutable_trait_change": "These traits define the identity: create a major version."
+    "immutable_trait_change": "These traits define the identity: create a major version.",
+    "budget_approval_required": "Approve a budget before paid production work.",
+    "budget_cap_exceeded": "This would exceed the approved budget.",
+    "continuity_errors": "Fix the continuity errors first.",
+    "dialogue_locked": "This line is locked; unlock it first.",
+    "episode_locked": "This episode is approved: branch the story instead.",
+    "adults_only": "Mature productions are for adults."
   },
   "remix": {
     "slots": "Who stars in it?",
@@ -386,5 +392,140 @@
       "needs_cast": "Add this character to the cast.",
       "bound": "Already in the cast."
     }
+  },
+  "production": {
+    "title": "Production",
+    "question": "Which story do you want to tell?",
+    "slogan": "YOUR STORY. YOUR STARS. YOUR CINEMA.",
+    "entry": {
+      "series": "Create Your Own Series",
+      "film": "Make Your Own Movie",
+      "stars": "Create Your Own Stars",
+      "life_story": "Your Life. Your Story."
+    },
+    "titleLabel": "Title",
+    "logline": "Logline (one or two sentences)",
+    "format": "Format",
+    "episodes": "Episodes",
+    "minutes": "Minutes per episode",
+    "lengthHint": "Long episodes are made of many short shots; 30 minutes is not one generation.",
+    "formats": {
+      "micro": "Micro drama (30 s–2 min)",
+      "short_series": "Short series (2–5 min)",
+      "standard_episode": "Episode (5–10 min)",
+      "long_episode": "Long episode (10–30 min)",
+      "short_film": "Short film (5–30 min)",
+      "feature": "Feature (30+ min, in parts)"
+    },
+    "style": "Visual style",
+    "styles": {
+      "photoreal": "Photoreal",
+      "cinematic": "Cinematic",
+      "cartoon_2d": "2D cartoon",
+      "animation_3d": "3D animation",
+      "anime": "Anime",
+      "stylized": "Stylized",
+      "mixed": "Mixed"
+    },
+    "rating": "Age rating",
+    "ratings": {
+      "general": "General",
+      "teen": "Teen",
+      "mature": "Mature (18+)"
+    },
+    "ratingHint": {
+      "general": "No swearing; fictional conflict is fine.",
+      "teen": "Slang and swearing allowed in fiction.",
+      "mature": "Adult fictional dialogue. Some content is never allowed, at any rating."
+    },
+    "profile": "Budget profile",
+    "profiles": {
+      "economy": "Economy",
+      "standard": "Standard",
+      "cinema_pro": "Cinema Pro"
+    },
+    "create": "Create production",
+    "status": {
+      "draft": "Draft",
+      "planned": "Planned",
+      "queued": "Queued",
+      "generating": "Generating",
+      "qc": "Quality checks",
+      "assembling": "Assembling",
+      "pilot_rendering": "Pilot rendering",
+      "pilot_ready": "Pilot ready",
+      "ready": "Ready",
+      "failed": "Failed",
+      "partial_failed": "Some shots failed (re-render charges only those)",
+      "cancelled": "Cancelled"
+    },
+    "script": "Screenplay",
+    "scriptHint": "INT. KITCHEN - NIGHT / CHARACTER / (whispering) / the line…",
+    "plan": "Plan this episode (free)",
+    "animatic": "Free storyboard preview",
+    "dialogue": "Dialogue editor",
+    "budget": "Budget",
+    "budgetUsd": "Budget limit (USD, optional)",
+    "estimate": "Estimate",
+    "estimateRange": "{{lo}}–{{hi}} credits",
+    "infeasible": "This budget can't make this production at this quality. Options:",
+    "alt": {
+      "reduce_duration": "Shorter",
+      "economy_profile": "Economy profile",
+      "less_action": "Less action",
+      "episode_by_episode": "Episode by episode",
+      "animatic_and_pilot": "Animatic + pilot first",
+      "increase_budget": "Increase the budget"
+    },
+    "approve": "Approve budget (hard cap)",
+    "capInfo": "Cap {{cap}} credits · used {{used}}",
+    "confirm": "Confirm {{credits}} credits",
+    "pilot": "Render 30–60 s pilot",
+    "render": "Render the episode",
+    "cancel": "Cancel (refund unfinished work)"
+  },
+  "dialogue": {
+    "title": "Dialogue",
+    "exactHint": "Exact mode: your words are kept exactly (no smoothing). Voice/lip-sync are not available yet; lines play as subtitles.",
+    "redo": "Redo",
+    "exact": "exact",
+    "text": "Line",
+    "preview": "Preview impact",
+    "lock": "Lock line",
+    "unlock": "Unlock line",
+    "impact": "Affects: {{levels}} · {{credits}} credits",
+    "level": {
+      "subtitles": "subtitles",
+      "voice": "voice",
+      "voice_not_available": "voice (not available)",
+      "voice_and_lip_sync": "voice + lip-sync",
+      "lip_sync_not_available": "lip-sync (not available)",
+      "shot_regeneration": "shot regeneration",
+      "story_review": "story review"
+    },
+    "delivery": {
+      "normal": "Normal",
+      "shout": "Shout",
+      "whisper": "Whisper",
+      "cry": "Crying",
+      "sarcastic": "Sarcastic",
+      "angry": "Angry",
+      "calm": "Calm"
+    }
+  },
+  "life": {
+    "private": "Private by default. Nothing is shared unless you choose to.",
+    "q": {
+      "childhood": "Where and how did you grow up?",
+      "turning_points": "Which moments changed your life?",
+      "people": "Who were the important people?",
+      "places": "Which places matter?",
+      "feelings": "What did you feel?",
+      "ending": "How should the story end?"
+    },
+    "draft": "Create the timeline + privacy check",
+    "people": "People named: {{names}}",
+    "confirm": "I reviewed the privacy check; real people are anonymised or agreed.",
+    "approve": "Create my story"
   }
 }

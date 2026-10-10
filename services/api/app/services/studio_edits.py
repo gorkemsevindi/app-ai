@@ -492,7 +492,8 @@ def propose(db: Session, user: User, project: StudioProject, base_version_id: uu
     else:
         hashes = studio.shot_hashes(db, base.storyboard)
         new_sb, notes = apply_ops(base.storyboard, ops, hashes, _render_state(db, project))
-        sb = studio.validate_storyboard(db, user, new_sb, cfg)  # consent, moderation, limits — same as any edit
+        studio.check_locked_lines(base.storyboard, new_sb)  # V7: locked/exact lines are never silently changed
+        sb = studio.validate_storyboard(db, user, new_sb, cfg, project)  # same checks as any edit
         new_sb = sb.model_dump(mode="json")
         before = studio.estimate_storyboard(db, user, project, base.storyboard)
         after = studio.estimate_storyboard(db, user, project, new_sb)
@@ -522,7 +523,7 @@ def apply(db: Session, user: User, project: StudioProject, e: StudioEditOperatio
         raise ApiError(409, "edit_not_applicable", f"this edit is {e.status}")
     if project.current_version_id != e.base_version_id:
         raise ApiError(409, "stale_edit", "the project changed since this edit was proposed; propose it again")
-    sb = studio.validate_storyboard(db, user, e.preview["storyboard"], cfg)
+    sb = studio.validate_storyboard(db, user, e.preview["storyboard"], cfg, project)
     base = studio.get_version(db, project, e.base_version_id)
     v = studio.add_version(db, user, project, sb, "edit", {"edit_id": str(e.id)}, base.director, base.id)
     e.status, e.result_version_id, e.applied_at = "applied", v.id, datetime.now(UTC)
@@ -535,10 +536,22 @@ def undo(db: Session, user: User, project: StudioProject):
     if cur.parent_version_id is None:
         raise ApiError(409, "nothing_to_undo", "this is the first version")
     prev = studio.get_version(db, project, cur.parent_version_id)
-    sb = studio.validate_storyboard(db, user, prev.storyboard, cfg)
+    sb = studio.validate_storyboard(db, user, prev.storyboard, cfg, project)
     # the restored copy takes prev's place in the lineage, so undoing again keeps walking back
     return studio.add_version(db, user, project, sb, "restore", {"undo_of": str(cur.id)}, prev.director,
                               prev.parent_version_id)
+
+
+def redo(db: Session, user: User, project: StudioProject):
+    """V7: re-apply the version the last undo stepped back from (only right after an undo)."""
+    cfg = studio.require_enabled(db)
+    cur = studio.get_version(db, project, None)
+    undone = (cur.brief or {}).get("undo_of") if cur.source == "restore" else None
+    if not undone:
+        raise ApiError(409, "nothing_to_redo", "redo is only available right after an undo")
+    nxt = studio.get_version(db, project, uuid.UUID(undone))
+    sb = studio.validate_storyboard(db, user, nxt.storyboard, cfg, project)
+    return studio.add_version(db, user, project, sb, "redo", {"redo_of": str(nxt.id)}, nxt.director, cur.id)
 
 
 def edit_out(e: StudioEditOperation) -> dict:

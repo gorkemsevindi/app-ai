@@ -68,3 +68,51 @@ def check_output(worker_report: dict) -> Decision:
     if worker_report.get("required") and not scores:
         return Decision(False, "moderation_unavailable", ["no_scores"])
     return Decision(True)
+
+
+# ---------------------------------------------------------------- V7 fiction policy (drama dialogue)
+
+RATINGS = ("general", "teen", "mature")
+# Profanity / slang (EN + TR, ASCII-folded like `normalize`): allowed in fiction, but it sets the age rating.
+_PROFANITY = [re.compile(p) for p in (
+    r"\bfuck", r"\bshit", r"\bbitch", r"\basshole", r"\bbastard", r"\bdamn", r"\bcunt", r"\bdick(head)?\b",
+    r"\bmotherfuck", r"\bsiktir", r"\bsikeyim", r"\bamk\b", r"\bamina", r"\borospu", r"\bpic\b", r"\byarrak",
+    r"\bkahpe", r"\bserefsiz", r"\bgerizekal", r"\bsalak\b", r"\bdangalak")]
+_CHILD_SEXUAL = [re.compile(r"\bloli"), re.compile(r"\bshota"), re.compile(r"\bchild ?porn"), re.compile(r"\bcp\b")]
+_SELF_HARM_INCITE = [re.compile(r"\bkill yourself\b"), re.compile(r"\bkys\b"), re.compile(r"\bgo die\b")]
+# what each sensitive category needs at minimum (fiction)
+_NEEDS = {"profanity": "teen", "violence": "general", "hate_harassment": "mature", "sexual": "mature",
+          "self_harm_incitement": "mature"}
+
+
+def _hits(t: str, cat: str) -> bool:
+    return any(p.search(t) for p in _COMPILED.get(cat, []))
+
+
+def check_fiction(text: str | None, rating: str, kind: str = "dialogue") -> Decision:
+    """Fiction policy (Master Spec V7 §4): in a fictional production, dialogue may contain slang, swearing,
+    anger, threats between characters and adult language — the *rating* records it. Never allowed, at any
+    rating: sexual content involving minors, impersonation/fraud patterns, and sexual *visuals* (video providers
+    and app stores). Returned `reasons` are the content flags that drove the rating."""
+    if not text:
+        return Decision(True)
+    t = normalize(text)
+    if any(p.search(t) for p in _CHILD_SEXUAL) or (_hits(t, "minors") and _hits(t, "sexual")):
+        return Decision(False, "minors_sexual", ["never_allowed"])
+    if _hits(t, "impersonation_fraud"):
+        return Decision(False, "impersonation_fraud", ["never_allowed"])
+    if kind == "visual" and _hits(t, "sexual"):
+        return Decision(False, "sexual_visual", ["never_allowed"])
+    flags = []
+    if any(p.search(t) for p in _PROFANITY):
+        flags.append("profanity")
+    for cat in ("violence", "hate_harassment", "sexual"):
+        if _hits(t, cat):
+            flags.append(cat)
+    if any(p.search(t) for p in _SELF_HARM_INCITE):
+        flags.append("self_harm_incitement")
+    level = RATINGS.index(rating) if rating in RATINGS else 0
+    need = max((RATINGS.index(_NEEDS[f]) for f in flags), default=0)
+    if need > level:
+        return Decision(False, f"rating_required:{RATINGS[need]}", flags)
+    return Decision(True, None, flags)

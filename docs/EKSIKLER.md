@@ -260,5 +260,24 @@ learning_events, prompt_strategies, model_performance_aggregates, creative_prefe
   - Karakter işleri için yük testi, kimlik koşullandırmada öğrenen yönlendirme, en/tr dışındaki diller yok.
   - Mobil ekranlar cihazda denenmedi (tip kontrolü ve çeviri testleri geçti).
 
+### 5.5 V7 — AI Cinema & Short Drama Factory (ayrıntı: `docs/V7_DURUM_RAPORU.md`)
+- ✅ Dört giriş akışı, 10–30 dk bölüm planlama ve parçalı render, Exact Dialogue (argo/küfür derecelendirmeyle), replik editörü (etki analizi, geçmiş, A/B, geri al/yinele), seçili aralık düzenleme, hikâye hafızası ve dallar, Budget Director (kesin tavan, iade), animatic → pilot → tam render, outbox olayları, hayat hikâyesi sihirbazı, mobil ekranlar. Hepsi mock sağlayıcıyla test edildi.
+- **Kullanıcıdan gerekenler (V7):**
+  - Gerçek video sağlayıcısı, stil ve karakter referansı doğrulaması, saniye başı fiyat. [KARAR]
+  - Kredi başına perakende fiyat ve vergi (`productions.currency_per_credit`, `tax_rate`). [KARAR]
+  - TTS, dublaj ve dudak senkronu sağlayıcısı seçimi. Metni değiştirmeyen, "exact" uyumlu olmalı. [KARAR]
+  - Yetişkin kurmaca içerik için mağaza yaş sınıfı, bölge politikası ve yasal metinler. [HUKUK]
+- **Eksik / kısmi kalanlar:**
+  - Replik sesi, dublaj ve dudak senkronu yok; replikler altyazı.
+  - Gerçek sağlayıcıyla smoke test yapılamadı.
+  - Senaryo planlayıcı ve süreklilik denetimi kural tabanlı (AI değil).
+  - Çıktı moderasyon sınıflandırıcısı yok (dev ortamında null skorlayıcı).
+  - Yetişkin içerik için gerçek yaş doğrulaması yok (yalnızca beyan).
+  - Yapımlar için şikâyet uç noktası ve yayın akışı yok; yayın bilinçli olarak kapalı.
+  - Push bildirimleri yok (olaylar outbox'ta).
+  - Mobilde yatay profesyonel zaman çizelgesi ve çevrimdışı taslak kuyruğu yok; ekranlar cihazda denenmedi.
+  - Sağlayıcı başına rate limit ve üstel geri çekilmeli yeniden deneme yok.
+  - Titreme, diyalog WER ve dudak senkronu sapması ölçümleri yok.
+
 ### 5.3 İş bitince: Master Spec güncellemesi
-Kullanıcı talebi: Tüm aşamalar bitince Master Spec güncellenecek. V3, V4 ve V5'i tek belgede birleştiren, uygulanan durumu ("uygulandı / doğrulanmadı / eksik") ve gerçek mimariyi yansıtan güncel bir master spec hazırlanacak.
+Kullanıcı talebi: Tüm aşamalar bitince Master Spec güncellenecek. V3, V4, V5, V6 ve V7'yi tek belgede birleştiren, uygulanan durumu ("uygulandı / doğrulanmadı / eksik") ve gerçek mimariyi yansıtan güncel bir master spec hazırlanacak.

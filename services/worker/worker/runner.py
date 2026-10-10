@@ -205,7 +205,8 @@ def _process_studio(api: ApiClient, adapter, payload: dict, workdir: Path, hb: H
         enc = encode_vertical(raw, workdir, width=w, height=h, watermark=False, job_id=job_id, audio=raw)
         captions = None
     else:
-        shots = [(download(s["url"], workdir / f"shot_{i:02d}.mp4"), s) for i, s in enumerate(payload["shots"])]
+        shots = [(download(s["url"], workdir / f"shot_{i:02d}.mp4") if s.get("url") else None, s)
+                 for i, s in enumerate(payload["shots"])]
         music = download(payload["music_url"], workdir / "music.bin") if payload.get("music_url") else None
         hb.update(0.3, "postprocessing")
         film, captions = assemble(shots, spec, workdir, music)

@@ -131,6 +131,24 @@ def policy_guard(db: Session) -> dict:
     return policies.guard(db)
 
 
+def production_outbox(db: Session) -> dict:
+    """V7 transactional outbox: deliver production events (structured log + in-app feed; push/email adapters
+    plug in here). Delivery is at-least-once and marks each row; consumers dedupe by event id."""
+    import logging
+
+    from sqlalchemy import select
+
+    from .models import ProductionEvent
+
+    rows = db.execute(select(ProductionEvent).where(ProductionEvent.delivered_at.is_(None))
+                      .order_by(ProductionEvent.id).limit(1000).with_for_update(skip_locked=True)).scalars().all()
+    log = logging.getLogger("events")
+    for e in rows:
+        log.info("production_event id=%s type=%s production=%s", e.id, e.type, e.production_id)
+        e.delivered_at = _now()
+    return {"delivered": len(rows)}
+
+
 TASKS: dict[str, Callable[[Session], dict]] = {
     "template_metrics": template_metrics,
     "credit_expiry": credit_expiry,
@@ -140,6 +158,7 @@ TASKS: dict[str, Callable[[Session], dict]] = {
     "webhook_retry": webhook_retry,
     "learning_aggregate": learning_aggregate,
     "policy_guard": policy_guard,
+    "production_outbox": production_outbox,
 }
 
 

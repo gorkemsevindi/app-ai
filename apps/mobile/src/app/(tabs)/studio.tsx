@@ -3,6 +3,7 @@ import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Alert, Pressable, ScrollView, TextInput } from 'react-native';
 
+import { StoryEntry } from '@/components/StoryEntry';
 import { Body, Button, Card, Chip, Title } from '@/components/ui';
 import { api, ApiError } from '@/lib/api';
 import { errorMessage } from '@/lib/errors';
@@ -49,6 +50,7 @@ export default function StudioTab() {
   }
   return (
     <ScrollView style={{ backgroundColor: c.bg }} contentContainerStyle={{ padding: spacing.lg, gap: spacing.md }}>
+      <StoryEntry />
       <Title>{t('studio.title')}</Title>
       <Body muted>{t('studio.subtitle')}</Body>
       <TextInput accessibilityLabel={t('studio.briefLabel')} placeholder={t('studio.briefPlaceholder')} multiline
