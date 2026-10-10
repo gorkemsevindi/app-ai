@@ -468,6 +468,7 @@ class LedgerReason(str, enum.Enum):
     # V4 Stage A: `generation_debit` is the reservation, `refund` the release; settle confirms the charge.
     generation_settle = "generation_settle"
     expire = "expire"
+    license_fee = "license_fee"  # V4 Stage D: AI actor licence purchase
 
 
 class CreditLedger(Base):
@@ -585,6 +586,7 @@ class StudioCharacter(TimestampMixin, Base):
     identity_profile_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("identity_profiles.id", ondelete="SET NULL"))
     voice_permission: Mapped[str] = mapped_column(String(20), default="none")  # none|tts_stock (no cloning)
+    actor_license_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))  # licensed AI actor (Stage D)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
@@ -622,6 +624,140 @@ class ConsentReceipt(Base):
     statement: Mapped[str] = mapped_column(String(300))
     granted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+# ---------------------------------------------------------------- creator economy (V4 Stage D)
+
+class CreatorProfile(TimestampMixin, Base):
+    """Public creator identity. Payout/KYC data lives with the external KYC/payout provider; only its reference
+    and status are kept here (least privilege: ordinary services never see bank or tax details)."""
+
+    __tablename__ = "creator_profiles"
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    handle: Mapped[str] = mapped_column(String(32), unique=True)
+    display_name: Mapped[str] = mapped_column(String(60))
+    bio: Mapped[str] = mapped_column(String(300), default="")
+    payout_country: Mapped[str | None] = mapped_column(String(2))
+    status: Mapped[str] = mapped_column(String(16), default="active")  # active|suspended
+    terms_version: Mapped[str] = mapped_column(String(32))
+    terms_accepted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    payout_status: Mapped[str] = mapped_column(String(16), default="none")  # none|kyc_pending|verified|blocked
+    kyc_ref: Mapped[str | None] = mapped_column(String(120))
+
+
+class RevenuePolicy(Base):
+    """Versioned, immutable revenue-share rules. An earning stores the policy it was computed with, and
+    settlements snapshot them, so a later policy can never rewrite history."""
+
+    __tablename__ = "revenue_policies"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    version: Mapped[int] = mapped_column(Integer, unique=True)
+    config: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    effective_from: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CreatorEarning(Base):
+    """Append-only creator money ledger (USD micros). Accruals, clawbacks, payouts and adjustments are rows;
+    a balance is always SUM(amount_micros)."""
+
+    __tablename__ = "creator_earnings"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    creator_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
+    # template_share|referral_commission|actor_license|clawback|payout|adjustment
+    kind: Mapped[str] = mapped_column(String(24))
+    amount_micros: Mapped[int] = mapped_column(BigInteger)
+    gross_basis_micros: Mapped[int] = mapped_column(BigInteger, default=0)
+    policy_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("revenue_policies.id", ondelete="RESTRICT"))
+    policy_version: Mapped[int | None] = mapped_column(Integer)
+    job_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), index=True)
+    template_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), index=True)
+    attribution_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    license_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    payer_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), index=True)  # fraud signals only
+    settlement_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))  # set only on payout rows
+    idempotency_key: Mapped[str] = mapped_column(String(200), unique=True)
+    available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))  # end of the refund/fraud hold window
+    actor_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    note: Mapped[str | None] = mapped_column(String(300))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class Settlement(TimestampMixin, Base):
+    """A payout batch for one creator: frozen snapshot of the included earnings and policies."""
+
+    __tablename__ = "settlements"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    creator_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
+    period_end: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    amount_micros: Mapped[int] = mapped_column(BigInteger)
+    status: Mapped[str] = mapped_column(String(16))  # pending|held|approved|paid|cancelled
+    risk: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    external_ref: Mapped[str | None] = mapped_column(String(120))
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class SettlementItem(Base):
+    __tablename__ = "settlement_items"
+    earning_id: Mapped[int] = mapped_column(ForeignKey("creator_earnings.id", ondelete="RESTRICT"), primary_key=True)
+    settlement_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("settlements.id", ondelete="CASCADE"), index=True)
+
+
+class CreatorRiskHold(Base):
+    __tablename__ = "creator_risk_holds"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    creator_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    reason: Mapped[str] = mapped_column(String(200))
+    signals: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    status: Mapped[str] = mapped_column(String(16), default="open")  # open|released|confirmed_fraud
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    resolved_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    note: Mapped[str | None] = mapped_column(String(300))
+
+
+class ActorListing(TimestampMixin, Base):
+    """Opt-in licensed likeness: a creator offers *their own* consented identity profile under explicit terms."""
+
+    __tablename__ = "actor_listings"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    owner_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    identity_profile_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("identity_profiles.id", ondelete="CASCADE"))
+    consent_receipt_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    display_name: Mapped[str] = mapped_column(String(60))
+    terms: Mapped[dict[str, Any]] = mapped_column(JSONB)  # versioned contract terms (see actors.Terms)
+    terms_version: Mapped[int] = mapped_column(Integer, default=1)
+    status: Mapped[str] = mapped_column(String(16), default="pending_review")  # pending_review|active|paused|removed
+    moderation_note: Mapped[str | None] = mapped_column(String(300))
+
+
+class ActorLicense(Base):
+    __tablename__ = "actor_licenses"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    listing_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("actor_listings.id", ondelete="RESTRICT"), index=True)
+    licensee_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    terms_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    terms_version: Mapped[int] = mapped_column(Integer)
+    price_credits: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(16), default="active")  # active|revoked|expired
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    idempotency_key: Mapped[str] = mapped_column(String(200), unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class LicenseUsageEvent(Base):
+    __tablename__ = "license_usage_events"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    license_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("actor_licenses.id", ondelete="CASCADE"), index=True)
+    job_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    stage: Mapped[str] = mapped_column(String(16))  # dispatch|publish
+    allowed: Mapped[bool] = mapped_column(Boolean)
+    reason: Mapped[str | None] = mapped_column(String(80))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class ShareLink(Base):

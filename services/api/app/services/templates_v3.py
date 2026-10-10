@@ -323,6 +323,12 @@ def publish(db: Session, admin: User, t: Template, version_id: uuid.UUID, visibi
             raise ApiError(422, "bad_slots", "a remix template needs at least one slot")
     if t.moderation_status == "rejected":
         raise ApiError(409, "template_rejected", "rejected templates must be re-reviewed first")
+    if t.creator_id is not None:  # creator templates: the creator must still be in good standing
+        from ..models import CreatorProfile
+
+        prof = db.get(CreatorProfile, t.creator_id)
+        if prof is not None and prof.status != "active":
+            raise ApiError(409, "creator_suspended", "the creator is suspended")
     v.published_at = v.published_at or now()
     t.current_version_id = v.id
     t.moderation_status = "approved"

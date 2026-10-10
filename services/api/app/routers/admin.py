@@ -387,6 +387,9 @@ def manual_refund(job_id: uuid.UUID, body: ManualRefundIn, request: Request, adm
                   ref_type="generation_job", ref_id=str(job.id), actor_id=admin.id, note=body.reason[:200],
                   reverse_of=f"gen:{job.id}")
     job.refunded, job.billing_state = True, "released"
+    from ..services import creators
+
+    creators.on_job_refunded(db, job, body.reason, admin.id)  # claw back creator/referral earnings
     audit(db, admin.id, "job.manual_refund", "generation_job", str(job.id),
           {"credits": job.credit_cost, "reason": body.reason}, ip=client_ip(request))
     db.commit()

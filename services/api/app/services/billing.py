@@ -312,8 +312,10 @@ def apply_txn(db: Session, user: User, txn: StoreTxn) -> dict:
     granted = 0
     if txn.store_kind == "consumable":
         amount = int(p["credits"]) * max(1, txn.quantity)
+        # sandbox (App Review / TestFlight / Play test) purchases are not revenue: never "paid" credits
+        bucket = "purchased" if txn.environment == "production" else "promo"
         e = credits.apply(db, user.id, amount, LedgerReason.purchase, f"purchase:{txn.provider}:{txn.transaction_id}",
-                          ref_type="purchase", ref_id=txn.transaction_id, bucket="purchased")
+                          ref_type="purchase", ref_id=txn.transaction_id, bucket=bucket)
         granted = e.delta
         status = "granted"
     else:
@@ -323,7 +325,9 @@ def apply_txn(db: Session, user: User, txn: StoreTxn) -> dict:
             expires = txn.expires_at if p.get("credits_expire_with_period", True) else None
             e = credits.apply(db, user.id, int(p.get("credits_per_period", 0)) or 0, LedgerReason.subscription_grant,
                               f"subgrant:{txn.provider}:{txn.transaction_id}", ref_type="subscription",
-                              ref_id=txn.transaction_id, bucket="subscription", expires_at=expires) \
+                              ref_id=txn.transaction_id,
+                              bucket="subscription" if txn.environment == "production" else "promo",
+                              expires_at=expires) \
                 if int(p.get("credits_per_period", 0)) > 0 else None
             granted = e.delta if e is not None else 0
             sub.last_granted_period = txn.transaction_id
@@ -365,6 +369,9 @@ def reverse(db: Session, provider: str, transaction_id: str, why: str) -> int:
                               ref_type="purchase", ref_id=transaction_id, note=why, allow_negative=True,
                               prefer_source_key=key)
             taken += -e.delta
+            from . import creators
+
+            creators.on_purchase_reversed(db, key, why)  # earnings paid by these credits are clawed back
     return taken
 
 

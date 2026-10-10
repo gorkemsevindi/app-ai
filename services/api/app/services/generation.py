@@ -373,6 +373,10 @@ def complete(db: Session, job_id: uuid.UUID, worker_id: str, attempt: int, outpu
     job.error_code = job.error_message = None
     transition(job, JobStatus.completed)
     credits.settle(db, job)
+    if job.billing_state == "settled":
+        from . import creators
+
+        creators.on_job_settled(db, job)
     if job.studio_project_id is not None:
         from . import studio
 
