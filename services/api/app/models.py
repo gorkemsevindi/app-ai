@@ -548,6 +548,8 @@ class StudioProjectVersion(Base):
     brief: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
     storyboard: Mapped[dict[str, Any]] = mapped_column(JSONB)
     director: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)  # provider, model, label
+    # V5: immutable intent, creative mode, strategy version, composition, seed, candidate scores, similarity
+    creative: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, server_default="{}")
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -902,6 +904,36 @@ class ModelPerformanceAggregate(Base):
     quality: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
     errors: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
     computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PromptStrategy(Base):
+    """Registry of prompt-optimization strategy versions actually used (V5 §3, versioned & reversible)."""
+
+    __tablename__ = "prompt_strategies"
+    key: Mapped[str] = mapped_column(String(40), primary_key=True)
+    description: Mapped[str] = mapped_column(String(300))
+    config_sha256: Mapped[str] = mapped_column(String(64))
+    config: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    status: Mapped[str] = mapped_column(String(16), default="active")  # active|retired
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SimilarityAudit(Base):
+    """Auditable near-duplicate check of a plan against content lawfully available for comparison."""
+
+    __tablename__ = "similarity_audits"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    project_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    subject: Mapped[str] = mapped_column(String(20))
+    category: Mapped[str] = mapped_column(String(40))
+    method: Mapped[str] = mapped_column(String(30))
+    threshold: Mapped[float] = mapped_column(Float)
+    top_kind: Mapped[str | None] = mapped_column(String(20))
+    top_ref: Mapped[str | None] = mapped_column(String(64))
+    top_score: Mapped[float] = mapped_column(Float)
+    decision: Mapped[str] = mapped_column(String(20))  # ok|near_duplicate|intentional_reuse
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
 
 class ShareLink(Base):

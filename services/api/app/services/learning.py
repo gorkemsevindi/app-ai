@@ -283,8 +283,32 @@ def overview(db: Session, days: int) -> dict:
                 alerts.append({"provider": prov, "feature": feat, "type": "rating_drop",
                                "before": round(p["rating_sum"] / p["ratings"], 3), "now": round(rating, 3)})
     events = db.execute(select(LearningEvent.kind, func.count()).group_by(LearningEvent.kind)).all()
+    diversity = _diversity(db, days)
     training_eligible = db.execute(select(func.count()).select_from(LearningEvent).where(
         LearningEvent.consent["content_training"].as_boolean().is_(True))).scalar_one()
-    return {"days": days, "rows": rows, "alerts": alerts,
+    return {"days": days, "rows": rows, "alerts": alerts, "diversity": diversity,
             "eligibility": {"events": dict(events), "content_training_opt_in_events": training_eligible,
                             "note": "no content is retained for training in this phase"}}
+
+
+def _diversity(db: Session, days: int) -> dict:
+    """V5 §4/§8: creative diversity by genre (entropy of composition strategies over planned versions) and the
+    near-duplicate rate from similarity audits. Low entropy in a genre = the planner keeps repeating itself."""
+    from collections import Counter
+
+    from ..models import SimilarityAudit, StudioProjectVersion
+    from .creative import entropy
+
+    since = _now() - timedelta(days=days)
+    by_genre: dict[str, Counter] = defaultdict(Counter)
+    for c in db.execute(select(StudioProjectVersion.creative).where(StudioProjectVersion.created_at >= since)
+                        ).scalars():
+        if c and c.get("composition"):
+            by_genre[(c.get("intent") or {}).get("genre", "general")][c["composition"]] += 1
+    audits = db.execute(select(SimilarityAudit.decision, func.count()).where(SimilarityAudit.created_at >= since)
+                        .group_by(SimilarityAudit.decision)).all()
+    total = sum(n for _, n in audits)
+    near = sum(n for d, n in audits if d == "near_duplicate")
+    return {"by_genre": {g: {"plans": sum(c.values()), "compositions": dict(c), "entropy_bits": entropy(c)}
+                         for g, c in sorted(by_genre.items())},
+            "near_duplicate_rate": round(near / total, 4) if total else None, "audits": dict(audits)}

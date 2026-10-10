@@ -84,7 +84,8 @@
     "report": "Bildir",
     "regenerate": "Bir tane daha yap",
     "reported": "Teşekkürler, ekibimiz inceleyecek.",
-    "aiLabel": "Yapay zekâ ile üretildi"
+    "aiLabel": "Yapay zekâ ile üretildi",
+    "rate": "Bu videoyu puanla (isteğe bağlı)"
   },
   "report": {
     "title": "Sorun ne?",
@@ -236,7 +237,19 @@
       "remove": "Sil",
       "extend": "+4 sn",
       "summary": "{{added}} eklenen, {{removed}} silinen, {{changed}} değişen sahne · yeni üretim: {{credits}} kredi"
-    }
+    },
+    "mode": {
+      "faithful": "Sadık",
+      "balanced": "Dengeli",
+      "experimental": "Deneysel"
+    },
+    "modeHint": {
+      "faithful": "Yazdığına sadık kalır, hiçbir şey eklemez.",
+      "balanced": "Yazdığını korur, ışık ve kamera önerileri ekler.",
+      "experimental": "Daha cesur görsel denemeler yapar; hikâyen değişmez."
+    },
+    "variations": "Varyasyon üret (2)",
+    "variationsReady": "Yeni sürümler hazır: {{versions}}. Sürümler listesinden seçebilirsin."
   },
   "creator": {
     "title": "Creator",
@@ -262,5 +275,16 @@
       "approved": "Yayında",
       "rejected": "Reddedildi"
     }
+  },
+  "learning": {
+    "title": "Öğrenme ayarları",
+    "technical_improvement": "Teknik iyileştirme (içerik saklanmaz)",
+    "content_training": "İçeriğimle model eğitimi",
+    "personalization": "Kişiselleştirme",
+    "on": "Açık",
+    "off": "Kapalı",
+    "note": "Videoların ve prompt'ların başka kullanıcılarla paylaşılmaz. Teknik iyileştirme sadece süre, başarı ve kalite sayılarını kullanır.",
+    "delete": "Öğrenme verilerimi sil",
+    "deleted": "Öğrenme verilerin silindi."
   }
 }

@@ -84,7 +84,8 @@
     "report": "Report",
     "regenerate": "Make another",
     "reported": "Thanks — our team will review it.",
-    "aiLabel": "AI-generated"
+    "aiLabel": "AI-generated",
+    "rate": "Rate this video (optional)"
   },
   "report": {
     "title": "What's wrong?",
@@ -236,7 +237,19 @@
       "remove": "Remove",
       "extend": "+4 s",
       "summary": "{{added}} added, {{removed}} removed, {{changed}} changed shots · new rendering: {{credits}} credits"
-    }
+    },
+    "mode": {
+      "faithful": "Faithful",
+      "balanced": "Balanced",
+      "experimental": "Experimental"
+    },
+    "modeHint": {
+      "faithful": "Sticks to what you wrote and adds nothing.",
+      "balanced": "Keeps your text and adds lighting and camera suggestions.",
+      "experimental": "Bolder visual ideas; your story stays the same."
+    },
+    "variations": "Make variations (2)",
+    "variationsReady": "New versions ready: {{versions}}. Pick one from the versions list."
   },
   "creator": {
     "title": "Creator",
@@ -262,5 +275,16 @@
       "approved": "Live",
       "rejected": "Rejected"
     }
+  },
+  "learning": {
+    "title": "Learning settings",
+    "technical_improvement": "Technical improvement (no content stored)",
+    "content_training": "Train models with my content",
+    "personalization": "Personalization",
+    "on": "On",
+    "off": "Off",
+    "note": "Your videos and prompts are never shared with other users. Technical improvement only uses timing, success and quality numbers.",
+    "delete": "Delete my learning data",
+    "deleted": "Your learning data was deleted."
   }
 }

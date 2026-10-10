@@ -7,7 +7,7 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ActionSheetIOS, Alert, Platform, ScrollView, View } from 'react-native';
 
-import { Body, Button, ProgressBar, Title } from '@/components/ui';
+import { Body, Button, Chip, ProgressBar, Title } from '@/components/ui';
 import { api, type Generation } from '@/lib/api';
 import { errorMessage } from '@/lib/errors';
 import { shareTemplateLink } from '@/lib/referral';
@@ -21,6 +21,7 @@ export default function JobScreen() {
   const { t } = useTranslation();
   const c = useColors();
   const [job, setJob] = useState<Generation | null>(null);
+  const [rating, setRating] = useState<number | null>(null);
   const player = useVideoPlayer(job?.output?.video_url ?? null, (p) => { p.loop = true; p.play(); });
 
   useEffect(() => {
@@ -66,6 +67,12 @@ export default function JobScreen() {
     }
   };
 
+  const rate = async (n: number) => {
+    setRating(n);
+    // feedback improves technical quality only; it is optional and never shared with other users
+    api(`/generations/${id}/feedback`, { body: { rating: n } }).catch(() => {});
+  };
+
   const report = () => {
     const send = async (reason: string) => {
       await api(`/generations/${id}/report`, { body: { reason } });
@@ -104,6 +111,12 @@ export default function JobScreen() {
           <Button title={t('job.share')} onPress={share} />
           <Button title={t('share.link')} variant="secondary" onPress={shareLink} />
           <Button title={t('job.download')} variant="secondary" onPress={download} />
+          <Body>{t('job.rate')}</Body>
+          <View style={{ flexDirection: 'row', gap: 6 }}>
+            {[1, 2, 3, 4, 5].map((n) => (
+              <Chip key={n} label={'★'.repeat(n)} active={rating === n} onPress={() => rate(n)} />
+            ))}
+          </View>
           <Button title={t('job.report')} variant="secondary" onPress={report} />
         </>
       ) : (

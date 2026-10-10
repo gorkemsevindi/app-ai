@@ -80,7 +80,34 @@ def plan(project_id: uuid.UUID, body: studio.Brief, user: User = Depends(current
     est = studio.estimate(db, user, p, v)
     db.commit()
     return {"version_id": str(v.id), "version": v.version, "storyboard": v.storyboard, "director": v.director,
-            "estimate": est}
+            "creative": _creative_out(v.creative), "estimate": est}
+
+
+def _creative_out(c: dict) -> dict:
+    """What the user sees about the plan: mode, why this candidate, similarity warning (never a rejection)."""
+    sim = c.get("similarity") or {}
+    return {"mode": c.get("mode"), "strategy": c.get("strategy"), "composition": c.get("composition"),
+            "seed": c.get("seed"), "intent": c.get("intent"), "candidates": c.get("candidates", []),
+            "similarity": sim, "near_duplicate": sim.get("decision") == "near_duplicate",
+            "suggestion": "This plan is close to one you (or the catalog) already have. Try a variation or "
+                          "the Experimental mode." if sim.get("decision") == "near_duplicate" else None}
+
+
+class VariationsIn(BaseModel):
+    count: int = Field(default=2, ge=1, le=4)
+    creative_mode: str | None = Field(default=None, pattern=r"^(faithful|balanced|experimental)$")
+
+
+@router.post("/projects/{project_id}/variations", status_code=201)
+def variations(project_id: uuid.UUID, body: VariationsIn, user: User = Depends(current_user),
+               db: Session = Depends(get_db)):
+    ratelimit.hit("studio_plan", str(user.id), 10)
+    p = studio.get_project(db, user, project_id)
+    vs = studio.variations(db, user, p, body.count, body.creative_mode)
+    out = [{"version_id": str(v.id), "version": v.version, "storyboard": v.storyboard,
+            "creative": _creative_out(v.creative), "estimate": studio.estimate(db, user, p, v)} for v in vs]
+    db.commit()
+    return {"items": out, "current_version_id": str(p.current_version_id)}
 
 
 class VersionIn(BaseModel):

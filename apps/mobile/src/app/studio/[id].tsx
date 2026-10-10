@@ -90,6 +90,15 @@ export default function StudioProjectScreen() {
     }
   };
   const timeline = (op: Record<string, unknown>) => propose({ source: 'timeline', auto_apply: true, ops: [op] });
+  const variations = async () => {
+    try {
+      const r = await api<{ items: { version: number }[] }>(`/studio/projects/${id}/variations`, { body: { count: 2 } });
+      Alert.alert(t('studio.variationsReady', { versions: r.items.map((x) => `v${x.version}`).join(', ') }));
+    } catch (e) {
+      Alert.alert(errorMessage(t, e));
+    }
+  };
+
   const undo = async () => {
     try { await api(`/studio/projects/${id}/undo`, { method: 'POST' }); await load(); }
     catch (e) { Alert.alert(errorMessage(t, e)); }
@@ -147,6 +156,7 @@ export default function StudioProjectScreen() {
           ) : <Body muted>{proposal.clarification ?? ''}</Body>
         ) : null}
         <Button title={t('studio.edit.undo')} variant="secondary" onPress={undo} />
+        <Button title={t('studio.variations')} variant="secondary" onPress={variations} />
       </Card>
       {[...(est?.limitations ?? [])].map((l, i) => <Body key={i} muted>{`⚠︎ ${l}`}</Body>)}
       {est ? (

@@ -43,7 +43,8 @@ def seam_score(boundary: Path, out: Path, direction: str) -> float | None:
 
 def compose_prompt(spec: dict) -> str:
     inp = spec["inputs"]
-    parts = [inp.get("style") or "", inp["prompt"]]
+    # V5: a creative-mode storyboard carries a derived optimized prompt; the user's original stays in `prompt`
+    parts = [inp.get("style") or "", inp.get("optimized_prompt") or inp["prompt"]]
     if inp.get("camera"):
         parts.append(f"Camera: {inp['camera']}.")
     for c in inp.get("characters", []):

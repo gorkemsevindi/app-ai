@@ -89,3 +89,83 @@ Phase C:
 - variation seeds;
 - similarity audits (with template reuse exempt);
 - mobile rating and consent UI.
+
+## Phase C: intent, prompt optimizer, creative modes, candidates, variations, similarity audits
+
+Migration: `0012_creative_intelligence` (additive, reversible): `prompt_strategies`, `similarity_audits`, `studio_project_versions.creative`.
+
+### What works
+
+**Immutable intent**
+- Stored on every planned version (`creative.intent`):
+  - a hash of the original brief;
+  - genre;
+  - **quoted phrases as hard requirements**;
+  - constraints (duration, aspect ratio, characters);
+  - the intent-precedence order.
+- The brief itself is stored unchanged.
+
+**Original vs optimized prompt**
+- Every shot keeps the user's or director's `prompt`. The `optimized_prompt` is *derived* from (prompt, mode, strategy `pv1`, composition, seed) and re-derived on every validation, so it is never stale and never overwrites the original.
+- The strategy library contains production technique only: composition, camera, lighting and pacing. It is registered with a config hash in `prompt_strategies`.
+- Storyboards without a creative mode (legacy and manual) are untouched, and their render hashes are unchanged. This is tested.
+- The worker sends the optimized prompt to the provider.
+
+**Creative modes**
+- **Faithful:** one candidate; the optimized prompt equals the original.
+- **Balanced** (default): two candidates, technique hints added.
+- **Experimental:** three candidates, wider visual variation.
+- The user picks the mode in the Studio tab.
+
+**Candidate plans**
+- Each candidate gets a distinct composition and seed.
+- Each is scored on: adherence (required phrases, target duration), feasibility (routed provider and capabilities), safety, cost against the budget, and novelty (1 − maximum similarity).
+- The best one is kept. All candidate scores are stored with the version.
+
+**Variations: `POST /studio/projects/{id}/variations`**
+- Same intent, new seeds **and** compositions not used before (randomness alone doesn't count as variation).
+- The current version is not changed; the variations are offered as new versions.
+
+**Similarity audits**
+- Method: character-trigram Jaccard.
+- Compared against **only** the same user's other projects and the public licensed template catalog. No other user's content is ever read.
+- Thresholds are category-aware and configurable (`creative.thresholds`).
+- A near-duplicate produces a **warning plus a suggestion** (a variation or Experimental mode), never a rejection.
+- Every check is recorded in `similarity_audits`.
+- Template remixes are intentional reuse: they are never optimized or audited.
+
+**Diversity dashboard:** `GET /admin/learning/overview` now includes, per genre, the composition distribution and its entropy, plus the near-duplicate rate.
+
+**Mobile**
+- Creative mode chips in the Studio tab.
+- Variations button in the project screen.
+- Optional 1–5 star rating on finished videos.
+- Learning settings in the profile: three consents and "delete my learning data".
+
+### V5 acceptance tests covered (`test_creative.py`, 6 tests)
+
+- **Same broad prompt planned 100 times** (balanced and experimental):
+  - ≥ 4 different compositions, none above 50 %, entropy ≥ 1.5 bits;
+  - ≥ 4 distinct camera sequences;
+  - the intent is preserved every time (same sentences, required phrase, exact duration).
+- **A viral template never feeds original plans:** a popular template's text never appears in an unrelated plan.
+- **Faithful mode adds nothing; template reuse is exempt from novelty penalties.**
+- **No cross-user comparison:** another user's identical plan is "ok"; the same user's repeat and a catalog match are warned.
+- Original vs optimized prompt, re-derivation after an edit, legacy hashes stable, variations distinct, dashboard, worker prompt.
+
+### Tests
+
+- **API: 109/109 passed.**
+- **Worker:** 20/20.
+- **Mobile:** `tsc` passes, 6/6.
+- `alembic check` shows no drift.
+
+### Known limitations
+
+- Similarity is a lexical method (character trigrams). Semantic (embedding-based) and perceptual (output frame) similarity need an embedding provider and calibration on labelled examples; the thresholds are configurable for that.
+- Candidate scoring uses heuristic weights. There is no blind human study of creativity yet; the benchmark harness supports blind review.
+- The Gemini director produces a single candidate per call. Several candidates would cost several calls; this stays configurable for later.
+
+### Next step
+
+Phase D: constrained bandit for technical routing, experiment assignments, and versioned learning policies (shadow → A/B → monitored expansion, with automatic rollback).

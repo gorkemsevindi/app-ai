@@ -10,6 +10,7 @@ import { radius, spacing, useColors } from '@/lib/theme';
 
 type Item = { id: string; title: string; status: string; aspect_ratio: string };
 const ASPECTS = ['9:16', '16:9', '1:1'] as const;
+const MODES = ['faithful', 'balanced', 'experimental'] as const;
 
 // AI Studio: brief -> storyboard (director) -> estimate -> confirm -> render. Plans are free; rendering needs
 // the user's explicit confirmation of the exact credit amount (server-enforced).
@@ -20,6 +21,7 @@ export default function StudioTab() {
   const [disabled, setDisabled] = useState(false);
   const [brief, setBrief] = useState('');
   const [aspect, setAspect] = useState<(typeof ASPECTS)[number]>('9:16');
+  const [mode, setMode] = useState<(typeof MODES)[number]>('balanced');
   const [busy, setBusy] = useState(false);
 
   useFocusEffect(useCallback(() => {
@@ -31,7 +33,7 @@ export default function StudioTab() {
     setBusy(true);
     try {
       const p = await api<{ id: string }>('/studio/projects', { body: { title: brief.slice(0, 60), aspect_ratio: aspect } });
-      await api(`/studio/projects/${p.id}/storyboard`, { body: { brief, aspect_ratio: aspect, target_duration_s: 24 } });
+      await api(`/studio/projects/${p.id}/storyboard`, { body: { brief, aspect_ratio: aspect, target_duration_s: 24, creative_mode: mode } });
       setBrief('');
       router.push({ pathname: '/studio/[id]', params: { id: p.id } });
     } catch (e) {
@@ -56,6 +58,10 @@ export default function StudioTab() {
       <Card style={{ flexDirection: 'row', gap: spacing.sm }}>
         {ASPECTS.map((a) => <Chip key={a} label={a} active={aspect === a} onPress={() => setAspect(a)} />)}
       </Card>
+      <Card style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
+        {MODES.map((m) => <Chip key={m} label={t(`studio.mode.${m}`)} active={mode === m} onPress={() => setMode(m)} />)}
+      </Card>
+      <Body muted>{t(`studio.modeHint.${mode}`)}</Body>
       <Button title={t('studio.plan')} loading={busy} disabled={brief.trim().length < 10} onPress={create} />
       {items.map((p) => (
         <Pressable key={p.id} accessibilityRole="button" onPress={() => router.push({ pathname: '/studio/[id]', params: { id: p.id } })}>

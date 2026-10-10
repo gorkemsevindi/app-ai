@@ -113,6 +113,7 @@ class Shot(BaseModel):
     caption: str | None = Field(default=None, max_length=300)
     transition: Literal["cut", "fade"] = "cut"
     derive: Derive | None = None
+    optimized_prompt: str | None = Field(default=None, max_length=1500)  # V5: derived; `prompt` is the original
 
 
 class Scene(BaseModel):
@@ -150,6 +151,11 @@ class Storyboard(BaseModel):
     audio: AudioCfg = Field(default_factory=AudioCfg)
     captions: Captions = Field(default_factory=Captions)
     limitations: list[str] = Field(default_factory=list, max_length=20)
+    # V5 creative fields (None = legacy/manual storyboard: no optimization, render hashes unchanged)
+    creative_mode: Literal["faithful", "balanced", "experimental"] | None = None
+    composition: str | None = Field(default=None, max_length=40)
+    seed: int | None = Field(default=None, ge=0)
+    prompt_strategy: str | None = Field(default=None, max_length=40)
 
     def shots(self) -> list[Shot]:
         return [s for sc in self.scenes for s in sc.shots]
@@ -166,6 +172,7 @@ class Brief(BaseModel):
     character_ids: list[uuid.UUID] = Field(default_factory=list, max_length=8)
     music_asset_id: uuid.UUID | None = None
     platform: str | None = Field(default=None, max_length=30)
+    creative_mode: Literal["faithful", "balanced", "experimental"] = "balanced"
 
 
 # ---------------------------------------------------------------- characters + consent
@@ -282,6 +289,15 @@ def _check_text(text: str | None) -> None:
 
 
 def validate_storyboard(db: Session, user: User, raw: dict, cfg: dict) -> Storyboard:
+    from . import creative
+
+    if isinstance(raw, dict) and raw.get("creative_mode") is not None and isinstance(raw.get("scenes"), list):
+        import copy
+
+        try:
+            raw = creative.apply_creative(copy.deepcopy(raw))
+        except (KeyError, TypeError):
+            pass  # malformed: the schema validation below reports it
     try:
         sb = Storyboard.model_validate(raw)
     except ValidationError as e:
@@ -338,14 +354,17 @@ def validate_storyboard(db: Session, user: User, raw: dict, cfg: dict) -> Storyb
 
 
 def add_version(db: Session, user: User, project: StudioProject, sb: Storyboard, source: str, brief: dict,
-                director: dict, parent: uuid.UUID | None) -> StudioProjectVersion:
+                director: dict, parent: uuid.UUID | None, creative: dict | None = None,
+                make_current: bool = True) -> StudioProjectVersion:
     n = db.execute(select(func.coalesce(func.max(StudioProjectVersion.version), 0))
                    .where(StudioProjectVersion.project_id == project.id)).scalar_one()
     v = StudioProjectVersion(project_id=project.id, version=n + 1, parent_version_id=parent, source=source,
                              brief=brief, storyboard=sb.model_dump(mode="json"), director=director,
-                             created_by=user.id)
+                             created_by=user.id, creative=creative or {})
     db.add(v)
     db.flush()
+    if not make_current:
+        return v
     project.current_version_id = v.id
     project.aspect_ratio, project.language = sb.aspect_ratio, sb.language
     if project.status == "draft":
@@ -360,7 +379,11 @@ class RuleBasedDirector:
 
     name, label = "rule_based", "rule-based planner (not AI)"
 
-    def plan(self, brief: Brief, characters: list[StudioCharacter], cfg: dict) -> dict:
+    def plan(self, brief: Brief, characters: list[StudioCharacter], cfg: dict, composition: str = "classic",
+             seed: int = 0) -> dict:
+        from .creative import COMPOSITIONS
+
+        cams = COMPOSITIONS.get(composition, COMPOSITIONS["classic"])["camera"]
         allowed = sorted(int(x) for x in cfg["allowed_shot_durations"])
         sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+|\n+", brief.brief) if len(s.strip()) >= 5]
         target = min(brief.target_duration_s, int(cfg["max_total_s"]))
@@ -373,7 +396,7 @@ class RuleBasedDirector:
             text = sentences[i] if i < len(sentences) else brief.brief[:200]
             shots.append({"key": f"sh{i + 1}", "duration_s": per,
                           "prompt": f"{brief.style + '. ' if brief.style else ''}{text}"[:1500],
-                          "camera": "medium shot" if i % 2 else "wide establishing shot",
+                          "camera": cams[(i + seed) % len(cams)] if i else cams[0],
                           "characters": [c["key"] for c in chars][:4], "caption": text[:300],
                           "transition": "cut" if i == 0 else "fade"})
         return {"title": brief.title or brief.brief[:60], "language": brief.language,
@@ -382,7 +405,8 @@ class RuleBasedDirector:
                 "audio": {"music_asset_id": str(brief.music_asset_id) if brief.music_asset_id else None},
                 "captions": {"enabled": True, "burn_in": False},
                 "limitations": ["Planned by the rule-based planner, not an AI director: one shot per sentence.",
-                                "Dialogue is shown as captions; speech synthesis is not enabled yet."]}
+                                "Dialogue is shown as captions; speech synthesis is not enabled yet."],
+                "creative_mode": brief.creative_mode, "composition": composition, "seed": seed}
 
 
 class GeminiDirector:
@@ -461,16 +485,75 @@ def plan_storyboard(db: Session, user: User, project: StudioProject, brief: Brie
     _check_text(brief.style)
     chars = [get_character(db, user, cid) for cid in brief.character_ids]
     d = director(cfg)
-    raw = d.plan(brief, chars, cfg)
-    try:
-        sb = validate_storyboard(db, user, raw, cfg)
-    except ApiError as e:
-        if e.code == "content_blocked":
-            raise
-        raise ApiError(502, "director_invalid_output", "the director returned an unusable storyboard",
-                       {"reason": e.code}) from e
+    sb, meta = plan_candidates(db, user, project, brief, chars, d, cfg)
     return add_version(db, user, project, sb, "director", brief.model_dump(mode="json"),
-                       {"provider": d.name, "label": d.label}, project.current_version_id)
+                       {"provider": d.name, "label": d.label}, project.current_version_id, creative=meta)
+
+
+def variations(db: Session, user: User, project: StudioProject, count: int, mode: str | None
+               ) -> list[StudioProjectVersion]:
+    """V5 §3: user-requested variations of the same intent — distinct seeds AND composition strategies (randomness
+    alone isn't creativity). The brief, required phrases and constraints are unchanged; the current version stays."""
+    from . import creative
+
+    cfg = require_enabled(db)
+    base = get_version(db, project, None)
+    if not base.brief:
+        raise ApiError(409, "variations_need_brief", "variations need a storyboard planned from a brief")
+    brief = Brief.model_validate({**base.brief, **({"creative_mode": mode} if mode else {})})
+    chars = [get_character(db, user, cid) for cid in brief.character_ids]
+    d = director(cfg)
+    used = {base.creative.get("composition")} - {None}
+    out = []
+    for _ in range(count):
+        sb, meta = plan_candidates(db, user, project, brief, chars, d, cfg, seed=creative.new_seed(), avoid=used)
+        used.add(meta["composition"])
+        out.append(add_version(db, user, project, sb, "variation", brief.model_dump(mode="json"),
+                               {"provider": d.name, "label": d.label}, base.id, creative=meta, make_current=False))
+    return out
+
+
+def plan_candidates(db: Session, user: User, project: StudioProject, brief: Brief, chars: list, d, cfg: dict,
+                    seed: int | None = None, avoid: set[str] | None = None) -> tuple[Storyboard, dict]:
+    """V5 §3: generate mode-dependent candidate plans (distinct composition + seed), score adherence,
+    feasibility, safety, cost and novelty, keep the best. The original brief and intent are never altered."""
+    from . import creative
+
+    ccfg = creative.config(db)
+    intent = creative.parse_intent(brief.brief, brief.creative_mode, brief.target_duration_s, brief.aspect_ratio,
+                                   len(chars))
+    seed = creative.new_seed() if seed is None else seed
+    n = creative.CANDIDATES[brief.creative_mode] if isinstance(d, RuleBasedDirector) else 1
+    corpus = creative.comparison_corpus(db, user.id, project.id)
+    scored = []
+    for i, comp in enumerate(creative.pick_compositions(brief.creative_mode, seed, n, avoid)):
+        cseed = (seed + i * 7919) % (2**31 - 1)
+        raw = d.plan(brief, chars, cfg, comp, cseed) if isinstance(d, RuleBasedDirector) else d.plan(brief, chars, cfg)
+        if not isinstance(d, RuleBasedDirector):
+            raw.update({"creative_mode": brief.creative_mode, "composition": comp, "seed": cseed})
+        try:
+            sb = validate_storyboard(db, user, raw, cfg)
+        except ApiError as e:
+            if e.code == "content_blocked":
+                raise
+            raise ApiError(502, "director_invalid_output", "the director returned an unusable storyboard",
+                           {"reason": e.code}) from e
+        dump = sb.model_dump(mode="json")
+        est = estimate_storyboard(db, user, project, dump)
+        text = creative.storyboard_text(dump)
+        novelty = 1.0 - max((creative.similarity(text, t) for _, _, t in corpus), default=0.0)
+        sc = creative.score_candidate(dump, intent, est["credits"], project.budget_credits,
+                                      est["provider"] is not None and not est["missing_capabilities"], novelty,
+                                      ccfg["weights"])
+        scored.append((sc["total"], i, sb, {"composition": comp, "seed": cseed, "scores": sc}))
+    scored.sort(key=lambda x: (-x[0], x[1]))
+    _, _, best, chosen = scored[0]
+    sim = creative.audit_similarity(db, user.id, project.id, best.model_dump(mode="json"), intent["genre"])
+    creative.register_strategy(db)
+    meta = {"intent": intent, "mode": brief.creative_mode, "strategy": creative.STRATEGY,
+            "composition": chosen["composition"], "seed": chosen["seed"],
+            "candidates": [c for _, _, _, c in scored], "similarity": sim}
+    return best, meta
 
 
 # ---------------------------------------------------------------- estimate
@@ -490,6 +573,9 @@ def _shot_inputs(db: Session, sb: Storyboard, shot: Shot, provider: str) -> dict
                 "aspect_ratio": sb.aspect_ratio, "provider": provider, "characters": refs}
     out = {"prompt": shot.prompt, "camera": shot.camera, "duration_s": shot.duration_s, "style": sb.style,
            "aspect_ratio": sb.aspect_ratio, "quality": sb.quality, "provider": provider, "characters": refs}
+    if shot.optimized_prompt is not None:  # V5: the derived prompt changes pixels -> part of the hash
+        out["optimized_prompt"] = shot.optimized_prompt
+        out["creative"] = {"mode": sb.creative_mode, "strategy": sb.prompt_strategy, "seed": sb.seed}
     if shot.derive is not None:  # extension: continuity depends on the source render
         out["extend"] = {"from_hash": shot.derive.from_hash, "direction": shot.derive.direction}
     return out
@@ -644,7 +730,9 @@ def render(db: Session, user: User, project: StudioProject, version_id: uuid.UUI
         if existing is not None:
             continue
         spec = {"shot": shot.model_dump(mode="json"), "inputs": inp, "content_hash": row["hash"],
-                "project_version_id": str(v.id), "resolution": RESOLUTIONS[sb.aspect_ratio]}
+                "project_version_id": str(v.id), "resolution": RESOLUTIONS[sb.aspect_ratio],
+                "creative_mode": sb.creative_mode or "manual", "prompt_strategy": sb.prompt_strategy or "v0",
+                "seed": sb.seed}
         if shot.derive is not None:  # extension: the worker needs the source render's boundary frames
             src = db.execute(select(StudioShotRender).where(StudioShotRender.project_id == project.id,
                                                             StudioShotRender.content_hash == shot.derive.from_hash)
