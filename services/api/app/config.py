@@ -60,6 +60,14 @@ class Settings(BaseSettings):
 
     # Billing
     revenuecat_webhook_auth: str | None = None
+    # Apple: root certificates downloaded from https://www.apple.com/certificateauthority/ (DER files);
+    # app_apple_id is required to accept production server notifications.
+    apple_root_cert_paths: list[str] = []
+    apple_app_apple_id: int | None = None
+    apple_online_checks: bool | None = None  # OCSP revocation checks; default on in staging/production
+    # Google Play Developer API service account (JSON key file path, from the secrets manager)
+    google_service_account_file: str | None = None
+    google_rtdn_token: str | None = None  # shared secret in the Pub/Sub push endpoint URL
     apple_bundle_id: str = "com.example.aivideo"
     google_package_name: str = "com.example.aivideo"
 
