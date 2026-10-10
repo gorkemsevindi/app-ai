@@ -173,7 +173,13 @@
     "unknown_shot": "There is no such shot.",
     "bad_edit": "This edit isn't possible.",
     "editor_invalid_output": "Couldn't understand the edit, please try again.",
-    "editor_not_configured": "The AI editor isn't configured yet."
+    "editor_not_configured": "The AI editor isn't configured yet.",
+    "creator_required": "Create a creator profile first.",
+    "handle_taken": "This handle is taken.",
+    "terms_required": "Accept the creator terms.",
+    "license_invalid": "This actor licence can't be used.",
+    "license_terms_violation": "This use breaks the licensed actor's terms.",
+    "territory_not_licensed": "This actor isn't licensed in your country."
   },
   "remix": {
     "slots": "Who stars in it?",
@@ -230,6 +236,31 @@
       "remove": "Remove",
       "extend": "+4 s",
       "summary": "{{added}} added, {{removed}} removed, {{changed}} changed shots · new rendering: {{credits}} credits"
+    }
+  },
+  "creator": {
+    "title": "Creator",
+    "comingSoon": "The creator program is coming soon.",
+    "join": "Publish templates and earn when they're used.",
+    "handle": "Handle",
+    "name": "Display name",
+    "terms": "I accept the creator terms",
+    "joinCta": "Become a creator",
+    "balance": "Balance: {{v}}",
+    "available": "Payable: {{v}}",
+    "pending": "In hold period: {{v}}",
+    "paid": "Paid out: {{v}}",
+    "payout": {
+      "none": "No payout account",
+      "kyc_pending": "Identity check pending",
+      "verified": "Payout account verified",
+      "blocked": "Payouts blocked"
+    },
+    "review": {
+      "pending": "Draft",
+      "review": "In review",
+      "approved": "Live",
+      "rejected": "Rejected"
     }
   }
 }

@@ -194,20 +194,20 @@ def on_job_settled(db: Session, job: GenerationJob) -> list[CreatorEarning]:
             pay_template = False
     refs = {"job_id": job.id, "template_id": job.template_id, "payer_id": payer}
     if pay_template:
-        out.append(_accrue(db, creator, "template_share", int(gross * cfg.creator_share_rate), gross, policy,
+        out.append(_accrue(db, creator, "template_share", round(gross * cfg.creator_share_rate), gross, policy,
                            f"tshare:{job.id}", cfg, **refs))
     if pay_referral:
-        out.append(_accrue(db, referrer, "referral_commission", int(gross * cfg.referral_rate), gross, policy,
+        out.append(_accrue(db, referrer, "referral_commission", round(gross * cfg.referral_rate), gross, policy,
                            f"ref:{job.id}", cfg, attribution_id=attr.id, **refs))
     return [e for e in out if e is not None]
 
 
 def _claw(db: Session, orig: CreatorEarning, fraction: float, key: str, note: str, actor: uuid.UUID | None) -> None:
-    amount = int(orig.amount_micros * min(1.0, fraction))
+    amount = round(orig.amount_micros * min(1.0, fraction))
     if amount <= 0 or db.execute(select(CreatorEarning.id).where(CreatorEarning.idempotency_key == key)).first():
         return
     db.add(CreatorEarning(creator_id=orig.creator_id, kind="clawback", amount_micros=-amount,
-                          gross_basis_micros=-int(orig.gross_basis_micros * min(1.0, fraction)),
+                          gross_basis_micros=-round(orig.gross_basis_micros * min(1.0, fraction)),
                           policy_id=orig.policy_id, policy_version=orig.policy_version, job_id=orig.job_id,
                           template_id=orig.template_id, attribution_id=orig.attribution_id,
                           license_id=orig.license_id, payer_id=orig.payer_id, idempotency_key=key,

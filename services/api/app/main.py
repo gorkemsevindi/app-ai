@@ -11,6 +11,7 @@ from .config import get_settings
 from .db import get_engine
 from .routers import (
     account,
+    actors,
     admin,
     auth,
     billing,
@@ -66,7 +67,8 @@ def create_app() -> FastAPI:
 
     for r in (auth.router, me.router, identity.router, templates.router, templates_v3.router, generations.router,
               account.router, multiperson.router, admin.router, worker.router, billing.router,
-              sharing.router, studio.router, creators.router):
+              sharing.router, studio.router, creators.router,
+              actors.router):
         app.include_router(r)
     return app
 

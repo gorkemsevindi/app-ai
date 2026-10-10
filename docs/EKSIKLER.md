@@ -4,7 +4,7 @@
 
 **Kullanım:** Her aşamada güncellenir. İstendiğinde bu dosya verilir.
 
-**Son güncelleme:** 2026-10-10 (Aşama C sonrası). Aşama D'de yeni eksik çıkarsa en alttaki bölüme eklenecek.
+**Son güncelleme:** 2026-10-10 (Aşama D sonrası).
 
 **Etiketler:**
 - **[SEN]** Senin işin: anahtar, hesap, sözleşme veya ticari karar.
@@ -36,9 +36,10 @@
 | 9 | Kredi başına net gelir, USD (`economics.usd_per_paid_credit`) | yok; gelir ve kâr boş gösteriliyor |
 | 10 | Dudak senkronu fiyatı | saniye başı 3 kredi |
 | 11 | Stüdyo fiyatı | standart saniye başı 10 kredi, premium 25 kredi |
-| 12 | Creator gelir payı (%) | Aşama D: yer tutucu, uzaktan ayar |
-| 13 | Davet komisyonu ve davet süreleri | Aşama D: yer tutucu, uzaktan ayar |
-| 14 | Minimum ödeme tutarı, ödeme gecikmesi, blokaj kuralları | Aşama D: yer tutucu, uzaktan ayar |
+| 12 | Creator gelir payı (%) | Gelir politikası (revenue policy) oluşturulana kadar hiç kazanç birikmez |
+| 13 | Davet komisyonu ve davet süreleri | Aynı politikadan gelir; aynı kural geçerli |
+| 14 | Minimum ödeme tutarı, ödeme gecikmesi, blokaj kuralları | Aynı politikadan gelir; aynı kural geçerli |
+| 14b | AI aktör lisans gelir payı (`actor_share_rate`) | Aynı politikadan gelir; aynı kural geçerli |
 | 15 | Ödeme altyapısı ve KYC sağlayıcısı (ör. Stripe Connect, Payoneer) | Seçilmedi; ödemeler manuel işaretleniyor |
 
 **Sağlayıcı ve hukuk kararları.**
@@ -111,6 +112,103 @@
 - Kırmızı takım (red team) moderasyon senaryoları için manuel test seti yok.
 - C2PA içerik kaynağı bilgisi şu an sadece bir bayrak; gerçek C2PA imzası yok.
 
-## 4. Aşama D sonrası eklenecekler
+## 4. Aşama D'den kalan eksikler
 
-(Aşama D tamamlanınca buraya yazılacak.)
+**Ödeme ve vergi altyapısı**
+- Gerçek ödeme ve KYC entegrasyonu yok. Ödemeler admin tarafından dış referansla "ödendi" diye işaretleniyor. KYC durumu da elle giriliyor; webhook bağlanmadı.
+- Vergi ve ülke kuralları yok: stopaj, fatura, ödeme yapılabilecek ülke listesi. [SEN] [HUKUK]
+- Ödeme dönemi kapanışları otomatik çalışmıyor (cron yok). Admin `/admin/settlements/run` uç noktasını elle çalıştırıyor.
+
+**Dolandırıcılık tespiti**
+- Sinyaller basit kurallarla çalışıyor: iade oranı, tek bir ödeyene bağımlılık, açık şikâyetler. Cihaz ve hesap çiftliği tespiti, otomatik kullanım ve sahte etkileşim modeli yok.
+- Davet kötüye kullanımı için kapsamlı kontrol yok. IP özetiyle tekil tıklama sayımı ve "kendini davet edemezsin" kuralı var; daha fazlası yok.
+
+**Admin, mobil ve analitik**
+- Admin panelinde creator moderasyonu, ödeme dönemi kapanışları ve risk blokajı ekranları yok; sadece API var.
+- Mobil uygulamada:
+  - creator şablon yükleme sihirbazı yok (API hazır; mobilde şu an sadece kazanç, bakiye ve şablon durumu görünüyor);
+  - AI aktör pazaryeri ekranları yok (API hazır);
+  - itiraz (appeal) ekranı yok.
+- Creator analitiğinde görüntülenme ve paylaşım verisi şablon metrik tablosundan geliyor; bu tablo zamanlanmış görev (cron) olmadan güncellenmiyor.
+
+**AI aktör pazaryeri** [HUKUK]
+- Hukuk incelemesi yapılmadan açılmamalı. Kod, inceleme referansı (`legal_review_ref`) girilmeden zaten çalışmıyor.
+- Yasaklı kullanım alanları (siyaset, yetişkin içerik vb.) sadece anahtar kelimeyle kontrol ediliyor; anlam düzeyinde bir sınıflandırıcı yok.
+- "Ticari kullanım" şartının yayınlanan videolarda uygulanması teknik olarak takip edilmiyor.
+- Ünlü veya başka bir kişiyi taklit tespiti, sadece "kendi doğrulanmış yüz profilin" kuralına dayanıyor. Yüz benzerliğiyle ünlü taraması yok.
+- İtiraz akışı sadece admin notu olarak var; kullanıcı arayüzü yok.
+
+**Hesap silme ve çakışma riski**
+- Creator hesabı silinirse para kayıtları (değiştirilemez kazanç kaydı) korunuyor ama profil temizleme politikası kesinleşmedi. [HUKUK]
+- Kullanıcı ödeme dönemi kapanışı sırasında aynı anda kazanç oluşturursa ne olacağı (eşzamanlılık) yük testinde denenmedi.
+
+## 5. Sırada bekleyen iş planı
+
+### 5.1 V4 Aşama E (sıradaki adım)
+- Sağlayıcı benchmark düzeneği (rıza alınmış test klipleriyle kalite, maliyet, gecikme ve hata oranı ölçümü).
+- Model yönlendirme tablosu ve kendi GPU'muzda çalıştırma adaptörleri.
+- Zamanlanmış görevler: metrikler, ödeme dönemi kapanışları, süresi dolan krediler, saklama süresi dolan dosyalar.
+- Yük testi, yedekten geri dönüş ve uluslararasılaştırma (çoklu dil ve ülke desteği).
+
+### 5.2 Master Spec V5: kendi kendine öğrenen motor
+Dosya: `docs/MASTER_SPEC_V5_SELF_LEARNING.docx`. Kullanıcı 2026-10-10'da ekledi; V4 tamamlanınca ele alınacak.
+
+V5, V4'ün bütün kapsamını korur ve şunları ekler:
+
+**İlkeler**
+- Önceki kullanıcıların videolarının içeriği değil, üretim tekniği öğrenilir. Ezber yok.
+- Önceliklendirme sırası: kullanıcının açık talimatı > seçilen şablon > seçilen yaratıcı mod > sistemin önerileri.
+- Kullanıcının bilerek yaptığı şablon tekrarı serbesttir; cezalandırılmaz.
+
+**Bağımsız servisler**
+- Niyet ayrıştırıcı, prompt iyileştirici, yaratıcı planlayıcı.
+- Teknik hafıza (model yeteneği, maliyet, güvenilirlik, kalite).
+- Rızaya bağlı tercih hafızası; kullanıcılar arası veri sızıntısı yok.
+- Model performans kaydı, uyarlanabilir yönlendirici.
+- Yenilik ve kalite değerlendiricileri, geri bildirim toplayıcı.
+- Çevrimdışı eğitici, deney kaydı, politika kapısı.
+
+**Yaratıcı modlar ve özgünlük kontrolleri**
+- Üç mod: Sadık (minimum yorum), Dengeli (varsayılan), Deneysel (daha geniş fikir üretimi).
+- Kullanıcının orijinal prompt'u hiçbir zaman değiştirilmez; iyileştirilmiş prompt ayrı ve sürümlü tutulur.
+- Ezber/kopya önleme: anlamsal benzerlik ve kategoriye göre ayarlanmış eşikler.
+- Çeşitlilik takibi: anlatı, kompozisyon, kamera, mekân, tempo.
+- Teknik yönlendirmede keşif/sömürü stratejisi (bandit); bütçe sınırlı, kullanıcıya gizli ek ücret yok.
+
+**Veri ve öğrenme döngüsü**
+- Geri bildirim ve veri yönetişimi: varsayılan olarak toplu ve sınırlı telemetri; eğitim için açık rıza (opt-in); silme ve vazgeçme yolu; zehirli geri bildirime karşı koruma.
+- İstek başına model ağırlığı yeniden eğitilmez.
+- Çevrimdışı döngü: önce gölge modda çalıştırma → sınırlı A/B testi → kademeli genişletme. Gerileme olursa otomatik geri alma.
+- İnce ayar (fine-tuning) en sonda ve isteğe bağlı; lisansı uygun açık ağırlıklı modellerle.
+
+**Değerlendirme**
+- Ölçütler: talimata uyum, kimlik tutarlılığı, zamansal tutarlılık, dudak senkronu, yenilik, çeşitlilik, maliyet, şikâyet oranı.
+- Kör insan değerlendirmesi.
+- Sabit ve çeşitli bir değerlendirme seti.
+
+**Yeni tablolar**
+learning_events, prompt_strategies, model_performance_aggregates, creative_preferences, evaluation_datasets, evaluation_runs, experiment_assignments, learning_policy_versions, model_registry_versions, similarity_audits, consent_records.
+
+**Kabul testleri**
+- Aynı prompt 100 kez çalıştırıldığında çeşitlilik kontrollü olmalı.
+- Viral bir şablon özgün üretimleri domine etmemeli.
+- Zehirli geri bildirim, rıza eksikliği, kullanıcı silme ve model gerilemesi senaryoları test edilmeli.
+- Kullanıcılar arası medya sızıntısı olmamalı.
+- Kendi kendine devreye giren model güncellemesi olmamalı.
+
+**Aşamalar**
+- A: denetim ve eksik analizi.
+- B: ölçümleme, rıza kontrolleri, teknik hafıza, değerlendirme düzeneği.
+- C: prompt iyileştirici, üç mod, yenilik ölçümü, geri bildirim.
+- D: çevrimdışı uyarlanabilir yönlendirme ve deneyler.
+- E: isteğe bağlı ince ayar.
+
+**Mevcut koddaki dayanaklar**
+- Ekonomi ve telemetri: `economics.py`, `model_runs`.
+- Kalite ölçümleri: dudak senkronu ve geçiş (seam) skorları.
+- Sürümlü storyboard'lar ve düzenleme işlemleri.
+- Şablon sıralaması.
+- Sağlayıcı kapasite tablosu.
+
+### 5.3 İş bitince: Master Spec güncellemesi
+Kullanıcı talebi: Tüm aşamalar bitince Master Spec güncellenecek. V3, V4 ve V5'i tek belgede birleştiren, uygulanan durumu ("uygulandı / doğrulanmadı / eksik") ve gerçek mimariyi yansıtan güncel bir master spec hazırlanacak.

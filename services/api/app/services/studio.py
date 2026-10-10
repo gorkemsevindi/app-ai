@@ -178,8 +178,26 @@ def active_consent(db: Session, character: StudioCharacter) -> ConsentReceipt | 
 
 def create_character(db: Session, user: User, name: str, description: str, traits: dict,
                      identity_profile_id: uuid.UUID | None, attest_own_likeness: bool,
-                     project_id: uuid.UUID | None) -> StudioCharacter:
+                     project_id: uuid.UUID | None, actor_license_id: uuid.UUID | None = None) -> StudioCharacter:
     require_enabled(db)
+    if actor_license_id is not None:  # a licensed AI actor (Stage D): the licence is the authorization
+        from . import actors
+
+        actors.require_enabled(db)
+        reason = actors.license_usable(db, actor_license_id, user.id)
+        if reason:
+            raise ApiError(409, "license_invalid", "this actor licence can't be used", {"reason": reason})
+        from ..models import ActorLicense, ActorListing
+
+        lst = db.get(ActorListing, db.get(ActorLicense, actor_license_id).listing_id)
+        _check_text(name)
+        _check_text(description)
+        ch = StudioCharacter(user_id=user.id, project_id=project_id, name=name or lst.display_name,
+                             description=description, traits=traits or {}, voice_permission="none",
+                             identity_profile_id=lst.identity_profile_id, actor_license_id=actor_license_id)
+        db.add(ch)
+        db.flush()
+        return ch
     for text in (name, description):
         _check_text(text)
     if project_id is not None:
@@ -230,6 +248,10 @@ def character_usable(db: Session, ch: StudioCharacter) -> bool:
     """A character with a real likeness needs a ready profile and an active consent receipt."""
     if ch.deleted_at is not None:
         return False
+    if ch.actor_license_id is not None:
+        from . import actors
+
+        return actors.license_usable(db, ch.actor_license_id, ch.user_id) is None
     if ch.identity_profile_id is None:
         return True
     prof = db.get(IdentityProfile, ch.identity_profile_id)
@@ -293,9 +315,21 @@ def validate_storyboard(db: Session, user: User, raw: dict, cfg: dict) -> Storyb
     for text in [sb.title, sb.style] + [c.name for c in sb.characters] + [c.description for c in sb.characters] + \
             [t for s in shots for t in [s.prompt, s.camera, s.caption] + [d.text for d in s.dialogue]]:
         _check_text(text)
+    texts_all = [sb.title, sb.style] + [t for s in shots for t in [s.prompt, s.camera, s.caption] +
+                                        [d.text for d in s.dialogue]]
     for c in sb.characters:
         if c.character_id is not None:
-            get_character(db, user, c.character_id)
+            ch = get_character(db, user, c.character_id)
+            if ch.actor_license_id is not None:  # licensed actor: the licence's prohibited contexts apply
+                from ..models import ActorLicense
+                from . import actors
+
+                lic = db.get(ActorLicense, ch.actor_license_id)
+                bad = actors.check_contexts(lic, texts_all) if lic is not None else ["license_missing"]
+                if bad:
+                    raise ApiError(422, "license_terms_violation",
+                                   "this storyboard uses the licensed actor in a prohibited context",
+                                   {"contexts": bad, "character": c.key})
     if sb.audio.music_asset_id is not None:
         a = db.get(AudioAsset, sb.audio.music_asset_id)
         if a is None or a.user_id != user.id or a.deleted_at is not None or a.status != "ready":
@@ -667,13 +701,26 @@ def maybe_assemble(db: Session, project: StudioProject) -> GenerationJob | None:
             end = lines[i + 1][0] if i + 1 < len(lines) else shot.duration_s
             captions.append({"start_ms": t + int(start * 1000), "end_ms": t + int(end * 1000), "text": text})
         t += shot.duration_s * 1000
+    credits_line = []
+    for c in sb.characters:
+        ch = db.get(StudioCharacter, c.character_id) if c.character_id else None
+        if ch is not None and ch.actor_license_id is not None:
+            from ..models import ActorLicense, ActorListing
+
+            lic = db.get(ActorLicense, ch.actor_license_id)
+            if lic is not None and lic.terms_snapshot.get("attribution_required"):
+                credits_line.append(db.get(ActorListing, lic.listing_id).display_name)
+    final_captions = captions if sb.captions.enabled else []
+    if credits_line and t >= 2000:  # licence terms: credit the licensed AI actor (even with captions off)
+        final_captions = final_captions + [{"start_ms": t - 2000, "end_ms": t,
+                                            "text": "Licensed AI actor: " + ", ".join(sorted(set(credits_line)))}]
     job = GenerationJob(
         id=uuid.uuid4(), user_id=project.user_id, kind=JobKind.studio_assemble, status=JobStatus.queued,
         queue_class="paid_high" if user.plan == "pro" else "free", studio_project_id=project.id,
         preferred_model="studio_assembler", idempotency_key=key, credit_cost=int(cfg["assemble_credits"]),
         max_attempts=get_settings().job_max_attempts, watermark=user.plan != "pro", est_cost_usd=0.0,
         spec={"project_version_id": str(v.id), "timeline": timeline,
-              "captions": captions if sb.captions.enabled else [], "burn_in": sb.captions.burn_in,
+              "captions": final_captions, "burn_in": sb.captions.burn_in,
               "audio": sb.audio.model_dump(mode="json"), "resolution": RESOLUTIONS[sb.aspect_ratio],
               "title": sb.title})
     db.add(job)
@@ -737,6 +784,13 @@ def build_payload(db: Session, job: GenerationJob) -> dict:
             if not c.get("character_id"):
                 continue
             ch = db.get(StudioCharacter, uuid.UUID(c["character_id"]))
+            if ch is not None and ch.actor_license_id is not None:
+                from . import actors
+
+                reason = actors.license_usable(db, ch.actor_license_id, ch.user_id)
+                actors.log_usage(db, ch.actor_license_id, job.id, "dispatch", reason)
+                if reason:
+                    raise DispatchRefused("license_invalid")
             if ch is None or not character_usable(db, ch):
                 raise DispatchRefused("consent_revoked")  # checked again at dispatch (spec V4 §8)
             if ch.identity_profile_id:
@@ -749,6 +803,16 @@ def build_payload(db: Session, job: GenerationJob) -> dict:
         if ext:
             base["boundary_video_url"] = st.presign_get(ext["source_video_key"], 3600)
         return base
+    v = db.get(StudioProjectVersion, uuid.UUID(job.spec["project_version_id"]))
+    for c in Storyboard.model_validate(v.storyboard).characters if v is not None else []:
+        ch = db.get(StudioCharacter, c.character_id) if c.character_id else None
+        if ch is not None and ch.actor_license_id is not None:  # licence re-checked at publication
+            from . import actors
+
+            reason = actors.license_usable(db, ch.actor_license_id, ch.user_id)
+            actors.log_usage(db, ch.actor_license_id, job.id, "publish", reason)
+            if reason:
+                raise DispatchRefused("license_invalid")
     base["shots"] = [{**s, "url": st.presign_get(s["video_key"], 3600)} for s in job.spec["timeline"]]
     music_id = (job.spec.get("audio") or {}).get("music_asset_id")
     if music_id:

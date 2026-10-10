@@ -173,7 +173,13 @@
     "unknown_shot": "Böyle bir sahne yok.",
     "bad_edit": "Bu düzenleme yapılamıyor.",
     "editor_invalid_output": "Düzenleme anlaşılamadı, tekrar dene.",
-    "editor_not_configured": "AI düzenleyici henüz yapılandırılmadı."
+    "editor_not_configured": "AI düzenleyici henüz yapılandırılmadı.",
+    "creator_required": "Önce creator profili oluştur.",
+    "handle_taken": "Bu kullanıcı adı alınmış.",
+    "terms_required": "Creator şartlarını kabul etmelisin.",
+    "license_invalid": "Bu aktör lisansı kullanılamıyor.",
+    "license_terms_violation": "Bu kullanım lisanslı aktörün şartlarına aykırı.",
+    "territory_not_licensed": "Bu aktör ülkende lisanslı değil."
   },
   "remix": {
     "slots": "Kim oynasın?",
@@ -230,6 +236,31 @@
       "remove": "Sil",
       "extend": "+4 sn",
       "summary": "{{added}} eklenen, {{removed}} silinen, {{changed}} değişen sahne · yeni üretim: {{credits}} kredi"
+    }
+  },
+  "creator": {
+    "title": "Creator",
+    "comingSoon": "Creator programı yakında.",
+    "join": "Şablon yayınla, kullanıldıkça kazan.",
+    "handle": "Kullanıcı adı",
+    "name": "Görünen ad",
+    "terms": "Creator şartlarını kabul ediyorum",
+    "joinCta": "Creator ol",
+    "balance": "Bakiye: {{v}}",
+    "available": "Ödenebilir: {{v}}",
+    "pending": "Bekleme süresinde: {{v}}",
+    "paid": "Ödenen: {{v}}",
+    "payout": {
+      "none": "Ödeme hesabı yok",
+      "kyc_pending": "Kimlik doğrulama bekleniyor",
+      "verified": "Ödeme hesabı doğrulandı",
+      "blocked": "Ödemeler durduruldu"
+    },
+    "review": {
+      "pending": "Taslak",
+      "review": "İncelemede",
+      "approved": "Yayında",
+      "rejected": "Reddedildi"
     }
   }
 }

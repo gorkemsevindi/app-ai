@@ -62,6 +62,7 @@ export default function ProfileTab() {
         </Card>
       ))}
       <Button title={t('profile.newProfile')} variant="secondary" onPress={() => router.push('/identity/new')} />
+      <Button title={t('creator.title')} variant="secondary" onPress={() => router.push('/creator')} />
       <Title style={{ fontSize: 20 }}>{t('profile.language')}</Title>
       <View style={{ flexDirection: 'row', gap: spacing.sm }}>
         {SUPPORTED.map((l) => (

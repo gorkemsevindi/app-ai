@@ -188,6 +188,7 @@ class CharacterIn(BaseModel):
     identity_profile_id: uuid.UUID | None = None
     attest_own_likeness: bool = False
     project_id: uuid.UUID | None = None
+    actor_license_id: uuid.UUID | None = None
 
 
 def _char_out(db: Session, ch: StudioCharacter) -> dict:
@@ -195,6 +196,7 @@ def _char_out(db: Session, ch: StudioCharacter) -> dict:
     return {"id": str(ch.id), "name": ch.name, "description": ch.description, "traits": ch.traits,
             "project_id": str(ch.project_id) if ch.project_id else None,
             "has_likeness": ch.identity_profile_id is not None,
+            "actor_license_id": str(ch.actor_license_id) if ch.actor_license_id else None,
             "consent": {"active": c is not None, "granted_at": c.granted_at.isoformat() if c else None},
             "usable": studio.character_usable(db, ch)}
 
@@ -203,7 +205,7 @@ def _char_out(db: Session, ch: StudioCharacter) -> dict:
 def create_character(body: CharacterIn, request: Request, user: User = Depends(current_user),
                      db: Session = Depends(get_db)):
     ch = studio.create_character(db, user, body.name, body.description, body.traits, body.identity_profile_id,
-                                 body.attest_own_likeness, body.project_id)
+                                 body.attest_own_likeness, body.project_id, body.actor_license_id)
     if ch.identity_profile_id:
         audit(db, user.id, "studio.consent_granted", "studio_character", str(ch.id), {}, ip=client_ip(request))
     db.commit()

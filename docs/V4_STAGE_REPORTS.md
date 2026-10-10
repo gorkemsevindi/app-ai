@@ -425,3 +425,141 @@ Stage D: creator marketplace and licensed AI actors.
 - Actor marketplace behind its own flag. It must not be switched on before legal review.
 
 Business decisions are needed before launch: revenue-share percentage, referral commission, minimum payout and settlement delay.
+
+## Stage D: creator marketplace, revenue share, settlements, licensed AI actors
+
+Feature flags:
+- `creator_marketplace` (off);
+- `actor_marketplace` (off). The actor marketplace also needs `legal_review_ref` in its config; turning the flag on alone does nothing.
+
+Migration: `0009_creator_economy` (additive, reversible). Money tables are append-only, enforced by a database trigger.
+
+### Creators
+
+**Onboarding**
+- Adults only, terms acceptance, unique handle, public profile.
+- Payout and KYC data are not stored. Only the external provider's reference and a status are kept.
+
+**Template submission**
+1. The creator creates a draft.
+2. The creator uploads the source clip, which needs:
+   - a rights basis: creator-owned or licensed;
+   - evidence references;
+   - confirmation that **everyone visible** agreed to its use as a remix template.
+3. The clip belongs to the creator's own account, which also fixes the old "admin-owned source clip" issue for creator templates.
+4. The creator defines slots and creates a version. Models and pricing are set by the platform.
+5. The creator submits it: review queue → admin publish, or reject.
+
+**Suspension**
+- Removes the creator's templates from the app and holds their payouts.
+- Publishing is refused while the creator is suspended.
+
+### Money: policies, earnings, clawbacks, settlements
+
+**Revenue policy**
+- `RevenuePolicy` is versioned and immutable.
+- **With no policy nothing accrues.** Rates are your decision and are never defaulted in code.
+- Policy settings:
+  - creator, referral and actor share rates;
+  - template-vs-referral precedence, or explicit stacking;
+  - `usd_per_paid_credit` (net revenue per paid credit);
+  - settlement delay;
+  - minimum payout;
+  - risk thresholds.
+
+**Earnings (`creator_earnings`, append-only, USD micros)**
+- Only paid production credits that a settled job actually consumed are counted.
+- Promo, reward, legacy and **sandbox** credits never earn. Sandbox purchases now go to the promo bucket.
+- Self-use never earns.
+- Each earning row keeps the policy version it was computed with.
+
+**Clawbacks**
+- A support refund claws back the job's earnings in full.
+- A store refund or chargeback claws back in proportion to how much of each job that purchase paid for.
+- If money was already paid out, the clawback offsets future earnings.
+
+**Settlements**
+- Each payable row is batched exactly once, with a snapshot of the rows and policies.
+- Risk signals (refund rate, single-payer concentration, open reports, open hold) put the settlement on `held` and open a risk hold for review.
+- Flow: approve → pay. Paying requires a **verified payout account** and an external payout reference. The payout is written as a negative ledger row.
+
+**Endpoints**
+- Creators: `/creator/earnings`, `/creator/analytics` (per template: views, generations, successful generations, paid qualifying uses, conversion, gross attributable revenue, platform deductions, creator earnings; plus referral earnings).
+- Admin: `/admin/revenue-policies`, `/admin/settlements/run`, `/admin/settlements/{id}/{approve|hold|cancel|pay}`, `/admin/creators/risk-holds`, `/admin/creators/{id}/status`, `/admin/creators/{id}/payout-status`, `/admin/templates/review-queue`.
+
+### Licensed AI actors (behind flag and legal gate)
+
+**Listings**
+- A creator can list only **their own** ready identity profile, with a consent receipt and versioned terms:
+  - permitted uses and territories;
+  - licence duration;
+  - commercial use;
+  - prohibited contexts (adult and political are always added);
+  - price;
+  - attribution;
+  - always revocable.
+- A listing goes live after moderation.
+
+**Licences**
+- Bought with confirmation of the exact price, and idempotent.
+- The licence keeps a snapshot of the terms.
+- The fee is charged in credits (`license_fee`). The owner's paid share is a separate ledger kind (`actor_license`).
+
+**Use in Studio**
+- A character can be linked to a licence.
+- A storyboard that uses the actor in a prohibited context returns `license_terms_violation`.
+- The licence is re-checked at shot dispatch and again at publication (assembly). Every check is logged in `license_usage_events`.
+- An attribution caption is added when the terms require it.
+
+**Withdrawal or moderation removal**
+- The listing is removed and consent revoked.
+- All licences end, the unused time is refunded pro rata, and the owner's earning is clawed back in the same proportion.
+- Queued work using the actor is refused.
+
+### Mobile
+
+Profile → Creator screen: become a creator (with terms), balances (payable, in hold period, paid), template review status.
+
+### Tests
+
+**API: 95/95 passed (11 new)**
+- `test_creators.py` (7):
+  - onboarding and public profile;
+  - submission needs rights and consent, the review queue, publish, suspension;
+  - accrual rules: no policy, promo, self-use, immutability;
+  - precedence vs stacking, and policy versioning;
+  - clawbacks (store refund proportional, support refund full);
+  - settlement with risk hold, release, approve, payout needing verification and a reference, balances, analytics;
+  - policy validation and immutability.
+- `test_actors.py` (4):
+  - legal gate and listing rules;
+  - price confirmation, territory, actor earnings;
+  - Studio use with prohibited context, dispatch and publish checks, attribution, withdrawal with refund and clawback, refusal at publication;
+  - moderation takedown.
+
+**Other checks**
+- Worker 20/20 passed.
+- Mobile `tsc` passes and node tests 5/5.
+- `ruff` clean; `alembic check` shows no drift.
+
+### Known limitations
+
+See `docs/EKSIKLER.md` §4. The main ones:
+- no real payout or KYC provider;
+- no tax rules;
+- settlements are not scheduled;
+- fraud signals are simple rules;
+- no admin or mobile UI for creator uploads or the actor marketplace;
+- prohibited contexts are checked by keywords only;
+- the actor marketplace must not launch before legal review.
+
+### Next step
+
+Stage E:
+- a provider benchmark harness on consented test clips (quality, cost, latency, failure rate);
+- a model-routing table;
+- adapters for running on our own GPUs;
+- scheduled jobs (metrics, settlements, expiry, lifecycle);
+- load tests;
+- backup and restore;
+- internationalization.
