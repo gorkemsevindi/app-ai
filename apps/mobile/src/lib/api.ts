@@ -123,3 +123,26 @@ export type MultiConfig = {
   enabled: boolean; max_persons: number; max_duration_s: number; min_duration_s: number; resolutions: string[];
   max_upload_mb: number;
 };
+
+// ---- AI Studio (V4 Stage B)
+export type StudioShot = {
+  key: string; duration_s: number; prompt: string; camera?: string; caption?: string | null;
+  dialogue?: { character?: string | null; text: string; start_s: number }[]; transition?: 'cut' | 'fade';
+};
+export type Storyboard = {
+  title: string; language: string; aspect_ratio: '9:16' | '16:9' | '1:1'; style: string;
+  scenes: { key: string; title: string; shots: StudioShot[] }[]; limitations: string[];
+  captions: { enabled: boolean; burn_in: boolean };
+};
+export type StudioEstimate = {
+  version_id: string; version: number; credits: number; new_shots: number; reused_shots: number;
+  limitations: string[]; missing_capabilities: string[]; blocked: { shot: string }[]; within_budget: boolean;
+  balance: number; director?: { provider: string; label: string };
+};
+export type StudioProject = {
+  id: string; title: string; status: 'draft' | 'planned' | 'rendering' | 'ready' | 'failed';
+  aspect_ratio: string; current_version: { id: string; version: number; storyboard: Storyboard;
+    director: { provider?: string; label?: string } } | null;
+  shots: { key: string; status: string }[];
+  output: { video_url: string; captions_url: string | null; duration_ms: number } | null;
+};

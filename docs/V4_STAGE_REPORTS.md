@@ -201,3 +201,131 @@ Stage B: AI Studio foundations.
 - Character references with consent receipts.
 
 Real video generation needs the `GEMINI_API_KEY` secret. Until then a mock provider is used and labelled as a mock.
+
+## Stage B: AI Studio foundations
+
+Feature flag: `studio` (off). Migration: `0007_studio` (additive, reversible; adds the `studio_shot` and `studio_assemble` job kinds).
+
+### What works
+
+**Projects and immutable versions**
+- `POST /studio/projects` creates a project with title, aspect ratio (9:16, 16:9 or 1:1), language and an optional project budget in credits.
+- Every storyboard change is a new immutable `studio_project_versions` row (a database trigger blocks UPDATE):
+  - `storyboard` = director plan;
+  - `versions` = manual edit;
+  - `revisions/{id}/restore` = restore an earlier version.
+- A storyboard contains scenes, shots, camera, characters, dialogue, captions, transitions, music, quality and honest limitations.
+- Validation:
+  - unique scene and shot keys;
+  - allowed shot durations (default 4, 6 or 8 s);
+  - maximum number of shots and total length;
+  - every character reference resolves;
+  - dialogue fits inside its shot;
+  - every text passes moderation;
+  - characters and music must belong to the user.
+
+**Director (brief → storyboard)**
+- The default is a rule-based planner (one shot per sentence). It is labelled **"rule-based planner (not AI)"** in the response and the app.
+- `gemini` uses the official `google-genai` SDK with a JSON-schema response. It needs `GEMINI_API_KEY` and `studio.director_model`; without them it fails closed.
+- The director's output is validated like a user edit:
+  - ids the model invents are never trusted (characters are re-bound to the user's own);
+  - aspect ratio, quality and music come from the brief;
+  - invalid output returns `director_invalid_output`.
+
+**Estimate → confirm → render**
+- Each shot is identified by a hash of everything that changes its pixels (prompt, camera, duration, style, aspect ratio, quality, characters).
+- A new version reuses every unchanged shot, so editing one shot only re-renders and re-charges that shot. A caption- or music-only edit costs 0 credits and only re-runs the assembly.
+- `render` requires `confirmed_credits` to equal the exact estimate, otherwise it returns 409 `confirmation_required`.
+- Each new shot reserves credits on the existing ledger (reserve / settle / release). If credits run out, the whole render is rolled back.
+- A retry with the same `Idempotency-Key` returns the original result and charges nothing.
+- The render fails closed when:
+  - the project budget would be exceeded;
+  - a single job or the whole project would be above the cost ceiling;
+  - the provider has no configured price (`pricing_not_configured`);
+  - the provider lacks a capability the storyboard needs (`capability_unsupported`, e.g. CHARACTER_REFERENCE).
+- Every shot is an ordinary generation job: same queue, leases, retries, model fallback, per-shot output moderation and provenance.
+- When all shots of the target version are ready, the assembly job is queued automatically, once per version.
+
+**Characters and consent**
+- `POST /studio/characters` creates either:
+  - a fictional character (description only); or
+  - a real likeness, which must use **the user's own ready identity profile** plus `attest_own_likeness`, and creates a consent receipt.
+- `DELETE /studio/characters/{id}/consents` withdraws consent. New renders return `consent_required`. Shots already in the queue are refused when a worker claims them (spec V4 §8: checked at dispatch). The job fails as final and its credits are released.
+- Account deletion revokes all consents and deletes projects and characters.
+
+**Worker**
+- `mock_t2v`: dev/test only, refuses to run in production. Draws a clip clearly labelled "MOCK".
+- `veo`: Google Veo through `google-genai` (`generate_videos` → poll the operation → download). Needs `GEMINI_API_KEY` and `VEO_MODEL`.
+  - Reference images are **not** sent, because that capability is not verified yet.
+  - 1:1 is refused.
+  - Safety-filtered output fails as final; timeouts and cancellation are handled.
+- `studio_assembler` (CPU, ffmpeg):
+  1. normalizes each shot (adds a silent track if it has no audio);
+  2. applies fade transitions and concatenates;
+  3. writes WebVTT captions, optionally burned in;
+  4. mixes the licensed music bed under any shot audio, with a fade-out and loudness normalization (EBU R128, −14 LUFS);
+  5. runs the standard final encode (watermark for free users, AI provenance metadata).
+- Shots are intermediates: they are not watermarked. Only the finished film is.
+
+**Mobile**
+- New "Stüdyo" tab: brief, aspect ratio, free storyboard.
+- Project screen shows:
+  - storyboard, director label and limitations;
+  - an estimate (new / reused shots, balance);
+  - a render button behind a confirmation dialog;
+  - live shot statuses and a video player.
+- Shows "coming soon" while the flag is off.
+
+### API
+
+`/studio/projects` (POST, GET), `/studio/projects/{id}` (GET, PATCH, DELETE), `.../storyboard`, `.../versions` (POST, GET), `.../revisions/{v}/restore`, `.../estimate`, `.../render`, `.../timeline`, `/studio/characters` (POST, GET), `/studio/characters/{id}/consents` (POST, DELETE).
+
+Custom audio upload (`/audio-assets`) now also works when `studio` is on, so users can upload music.
+
+### Environment and config
+
+| Where | Name | Purpose |
+|---|---|---|
+| API | `GEMINI_API_KEY` | Gemini director |
+| Worker | `GEMINI_API_KEY`, `VEO_MODEL` | Veo shot rendering |
+| Remote config | `studio` | `director`, `director_model`, `shot_provider`, `fallback_provider`, `provider_capabilities`, `provider_usd_per_second`, `allowed_shot_durations`, `max_shots`, `max_total_s`, `credits_per_second{standard, premium}`, `assemble_credits`, `max_job_cost_usd`, `max_project_cost_usd` |
+
+New dependency: `google-genai` (Apache-2.0) for the API and for worker images that enable Veo.
+
+### Tests
+
+**API: 80/80 passed (7 new)**
+- Flag gate, rule-based label, estimate, free planning, IDOR.
+- Gemini director with a fake SDK client: schema request, re-binding of ids, invalid JSON, invalid durations, not configured.
+- Edit validation, moderation, versions cannot be updated.
+- Confirmation, reservations, replay, selective re-render (1 of 3 shots), caption-only edit, restore.
+- Pricing, cost ceiling, budget and capability all fail closed.
+- Consent revocation: render blocked, queued shot refused at dispatch and refunded, re-consent works.
+- **Real worker run:** 3 mock shots → automatic assembly → film with music audio, WebVTT captions and watermark. Then a caption-only edit with burn-in → only the assembly runs, 0 credits.
+
+**Other checks**
+- Worker 18/18 passed (5 new): Veo adapter against a fake client (polling, download, config mapping, safety filter, timeout, cancel, not configured), mock reference image, VTT format.
+- Mobile `tsc` passes and node tests 5/5.
+- `ruff` clean; `alembic check` shows no drift.
+
+### Cost
+
+- Planning is free (`director_credits` is 0). A Gemini director call costs tokens; this is not yet metered per call.
+- Shots: `credits_per_second × duration`. The USD cost comes from `provider_usd_per_second`. **Ops must enter verified Veo prices**; until then rendering with Veo is refused.
+- Assembly runs on CPU and is not charged by default (`assemble_credits=0`).
+
+### Known limitations
+
+- **The real Veo route is not tested**, because there is no API key in this environment. Model ids and prices must come from the account's current documentation.
+- **No speech synthesis (TTS) or dubbing.** Dialogue is shown as captions. Lip-sync for Studio shots is not connected yet.
+- **No reference-guided generation.** Character consistency relies on the text description only, and no consistency score is computed yet.
+- The timeline is read-only (`/timeline`). Trim, split and reorder in the UI are Stage C, together with conversational editing.
+- When rendering fails the project is marked `failed`. The user can render again, and only the failed shots are charged.
+
+### Next step
+
+Stage C:
+- conversational editing agent: typed, auditable edit operations that create new versions;
+- shot extend / prepend;
+- timeline trim, split and reorder;
+- revision preview with cost delta.

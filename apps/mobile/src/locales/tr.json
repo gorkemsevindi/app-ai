@@ -26,7 +26,8 @@
     "discover": "Keşfet",
     "video": "Senin videon",
     "library": "Videolarım",
-    "profile": "Profil"
+    "profile": "Profil",
+    "studio": "Stüdyo"
   },
   "discover": {
     "credits": "{{count}} kredi",
@@ -156,7 +157,16 @@
     "not_shareable": "Sadece tamamlanmış şablon videoları paylaşılabilir.",
     "purchase_other_account": "Bu satın alma başka bir hesaba ait.",
     "billing_not_configured": "Satın alma şu anda kullanılamıyor.",
-    "invalid_receipt": "Satın alma doğrulanamadı."
+    "invalid_receipt": "Satın alma doğrulanamadı.",
+    "capability_unsupported": "Seçili video sağlayıcısı bu storyboard'u desteklemiyor.",
+    "pricing_not_configured": "Bu sağlayıcı için fiyat tanımlı değil.",
+    "project_budget_exceeded": "Proje bütçesi aşılıyor.",
+    "director_not_configured": "AI yönetmen henüz yapılandırılmadı.",
+    "director_invalid_output": "Plan oluşturulamadı, tekrar dene.",
+    "bad_storyboard": "Storyboard geçersiz.",
+    "too_many_shots": "Çok fazla sahne var.",
+    "too_long": "Video çok uzun.",
+    "bad_duration": "Sahne süresi desteklenmiyor."
   },
   "remix": {
     "slots": "Kim oynasın?",
@@ -177,5 +187,30 @@
     "message": "Bu şablonu kendi yüzünle dene:",
     "unavailable": "Bu şablon artık mevcut değil.",
     "browse": "Şablonlara göz at"
+  },
+  "studio": {
+    "title": "AI Stüdyo",
+    "subtitle": "Hikâyeni yaz; sahneleri planlayalım, fiyatı gör, onaylayınca üretelim.",
+    "comingSoon": "AI Stüdyo yakında.",
+    "briefLabel": "Hikâye",
+    "briefPlaceholder": "Örn: Bir dansçı şafakta İstanbul'da uyanır, Galata Köprüsü'nde koşar, çatıda gün doğarken dans eder.",
+    "plan": "Storyboard oluştur (ücretsiz)",
+    "render": "Üret ({{credits}} kredi)",
+    "confirm": "{{credits}} kredi harcanacak",
+    "confirmDetail": "{{n}} yeni sahne üretilecek, {{r}} sahne yeniden kullanılacak.",
+    "estimate": "Tahmin: {{credits}} kredi · {{n}} yeni, {{r}} hazır sahne · bakiye {{balance}}",
+    "status": {
+      "draft": "Taslak",
+      "planned": "Planlandı",
+      "rendering": "Üretiliyor",
+      "ready": "Hazır",
+      "failed": "Bazı sahneler başarısız"
+    },
+    "shot": {
+      "new": "yeni",
+      "queued": "sırada",
+      "ready": "hazır",
+      "failed": "başarısız"
+    }
   }
 }

@@ -26,7 +26,8 @@
     "discover": "Discover",
     "video": "Your video",
     "library": "My videos",
-    "profile": "Profile"
+    "profile": "Profile",
+    "studio": "Studio"
   },
   "discover": {
     "credits": "{{count}} credits",
@@ -156,7 +157,16 @@
     "not_shareable": "Only finished template videos can be shared.",
     "purchase_other_account": "This purchase belongs to another account.",
     "billing_not_configured": "Purchases are not available right now.",
-    "invalid_receipt": "We couldn't verify this purchase."
+    "invalid_receipt": "We couldn't verify this purchase.",
+    "capability_unsupported": "The selected video provider can't render this storyboard.",
+    "pricing_not_configured": "This provider has no price configured.",
+    "project_budget_exceeded": "This exceeds the project budget.",
+    "director_not_configured": "The AI director isn't configured yet.",
+    "director_invalid_output": "Couldn't create a plan, please try again.",
+    "bad_storyboard": "The storyboard is invalid.",
+    "too_many_shots": "Too many shots.",
+    "too_long": "The video is too long.",
+    "bad_duration": "Unsupported shot duration."
   },
   "remix": {
     "slots": "Who stars in it?",
@@ -177,5 +187,30 @@
     "message": "Try this template with your own face:",
     "unavailable": "This template is no longer available.",
     "browse": "Browse templates"
+  },
+  "studio": {
+    "title": "AI Studio",
+    "subtitle": "Write your story; we plan the shots, show the price, and render after you confirm.",
+    "comingSoon": "AI Studio is coming soon.",
+    "briefLabel": "Story",
+    "briefPlaceholder": "E.g. A dancer wakes up in Istanbul at dawn, runs across the Galata bridge and dances on a rooftop at sunrise.",
+    "plan": "Create storyboard (free)",
+    "render": "Render ({{credits}} credits)",
+    "confirm": "This will use {{credits}} credits",
+    "confirmDetail": "{{n}} new shots will be rendered, {{r}} reused.",
+    "estimate": "Estimate: {{credits}} credits · {{n}} new, {{r}} ready shots · balance {{balance}}",
+    "status": {
+      "draft": "Draft",
+      "planned": "Planned",
+      "rendering": "Rendering",
+      "ready": "Ready",
+      "failed": "Some shots failed"
+    },
+    "shot": {
+      "new": "new",
+      "queued": "queued",
+      "ready": "ready",
+      "failed": "failed"
+    }
   }
 }

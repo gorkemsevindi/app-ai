@@ -27,6 +27,7 @@ export default function RootLayout() {
             <Stack.Screen name="multi/[videoId]" options={{ title: t('multi.title') }} />
             <Stack.Screen name="paywall" options={{ title: '', presentation: 'modal' }} />
             <Stack.Screen name="t/[token]" options={{ title: '' }} />
+            <Stack.Screen name="studio/[id]" options={{ title: t('studio.title') }} />
           </Stack>
         </AuthProvider>
       </ThemeProvider>
