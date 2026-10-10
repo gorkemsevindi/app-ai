@@ -27,6 +27,8 @@
 | 5 | Google Play: servis hesabı JSON dosyası (`APP_GOOGLE_SERVICE_ACCOUNT_FILE`) ve RTDN token'ı (`APP_GOOGLE_RTDN_TOKEN`) | Android ödemeleri |
 | 6 | Alan adı | Paylaşım linkleri ve universal/app links. Ek ayarlar: `APP_SHARE_BASE_URL`, `APP_IOS_APP_IDS`, `APP_ANDROID_SHA256_FINGERPRINTS`, mağaza URL'leri |
 | 7 | Marka adı ve bundle id | Şu an yer tutucu: "AI Video (working title)", `com.example.aivideo` |
+| 7a | Vercel: ağ izni (`api.vercel.com`, `vercel.com`) ve `VERCEL_TOKEN` ortam değişkeni, **ya da** Vercel panelinden repo bağlama (Root Directory `apps/web`) | V8 web Preview dağıtımı; şu an engelli |
+| 7b | Herkese açık API adresi (`API_BASE_URL`), S3 bucket CORS'ta web origin'i, `STORAGE_ORIGIN` | Web'in DEMO modundan çıkıp gerçek verilerle çalışması |
 
 **Ticari kararlar.**
 
@@ -279,5 +281,22 @@ learning_events, prompt_strategies, model_performance_aggregates, creative_prefe
   - Sağlayıcı başına rate limit ve üstel geri çekilmeli yeniden deneme yok.
   - Titreme, diyalog WER ve dudak senkronu sapması ölçümleri yok.
 
+### 5.6 V8: AI Cinema Studio, web + mobil + Vercel (ayrıntı: `docs/V8_DURUM_RAPORU.md`)
+- ✅ Ortak kanonik proje şeması ve komut motoru (TS ve Python birebir eşleşiyor). Editör API'si (revizyon, rebase/409, idempotency, varlık ACL'i). ffmpeg ile dışa aktarma: MP4, HEVC, WebM, PNG, JPEG, WebP, SRT ve VTT.
+- ✅ Next.js web stüdyosu: BFF ile güvenli oturum, video ve tasarım editörü, 2D sahne planı, onaylı dışa aktarma, DEMO modu. Gerçek yığına karşı 12 E2E testi; axe ihlali 0.
+- ✅ Mobil editör aynı motoru ve senkron kodunu kullanıyor; çevrimdışı taslak var (tsc ve `expo export` doğrulandı).
+- **Kullanıcıdan gerekenler (V8):** Vercel erişimi (1 / 7a). Yayında bir API ve depolama (7b). AI araçları için sağlayıcılar: STT, TTS, dudak senkronu, inpainting, büyütme, görselden videoya. [SEN]
+- **Eksik / kısmi kalanlar:**
+  - Vercel dağıtımı ve Vercel üzerinde performans ölçümü.
+  - Sunucu tarafı proxy önizleme, dalga formu ve küçük resimler.
+  - Parçalı ve kaldığı yerden devam eden yükleme.
+  - Ses kısma (ducking), efekt ve LUT.
+  - Tasarım editöründe kırpma, filtreler ve hizalama kılavuzları.
+  - Gerçek 3D sahne ve kamera sapma metriği.
+  - Canlı ortak çalışma.
+  - Mobilde cihaz testi, sürükleme hareketleri, oynatmalı önizleme ve ESLint.
+  - Web'de senaryo, replik ve süreklilik ekranları.
+  - Faz G: gerçek sağlayıcı testi, faturalama, gözlemlenebilirlik, yük testi ve kademeli yayın.
+
 ### 5.3 İş bitince: Master Spec güncellemesi
-Kullanıcı talebi: Tüm aşamalar bitince Master Spec güncellenecek. V3, V4, V5, V6 ve V7'yi tek belgede birleştiren, uygulanan durumu ("uygulandı / doğrulanmadı / eksik") ve gerçek mimariyi yansıtan güncel bir master spec hazırlanacak.
+Kullanıcı talebi: Tüm aşamalar bitince Master Spec güncellenecek. V3, V4, V5, V6, V7 ve V8'i tek belgede birleştiren, uygulanan durumu ("uygulandı / doğrulanmadı / eksik") ve gerçek mimariyi yansıtan güncel bir master spec hazırlanacak.
