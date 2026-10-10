@@ -96,3 +96,32 @@ def test_vtt_format(tmp_path):
     t = p.read_text()
     assert t.startswith("WEBVTT\n") and "00:00:00.000 --> 00:00:04.000\nMerhaba → dünya" in t
     assert "01:02:03.004 --> 01:02:04.000" in t
+
+
+def test_mock_extension_starts_on_boundary_frame_and_prepend_ends_on_it(tmp_path):
+    import cv2
+    import numpy as np
+
+    from worker.studio.shots import seam_score
+
+    src = tmp_path / "src.mp4"
+    wr = cv2.VideoWriter(str(src), cv2.VideoWriter_fourcc(*"mp4v"), 24, (720, 1280))
+    for f in range(48):
+        wr.write(np.full((1280, 720, 3), (f * 5) % 255, np.uint8))
+    wr.release()
+    for direction in ("end", "start"):
+        wd = tmp_path / direction
+        wd.mkdir()
+        spec = {**SPEC, "extend": {"direction": direction}}
+        out, _ = MockT2V().render(spec, {}, wd, lambda *a: None, threading.Event(), boundary=src)
+        assert seam_score(src, out, direction) > 0.95
+    # without continuity the seam is visibly worse
+    plain, _ = MockT2V().render(SPEC, {}, tmp_path, lambda *a: None, threading.Event())
+    assert seam_score(src, plain, "end") < 0.9
+
+
+def test_veo_refuses_extension_until_verified(tmp_path):
+    with pytest.raises(AdapterError) as e:
+        VeoShot(client=FakeVeo(), model="m").render({**SPEC, "extend": {"direction": "end"}}, {}, tmp_path,
+                                                    lambda *a: None, threading.Event())
+    assert e.value.code == "capability_unsupported" and not e.value.retryable

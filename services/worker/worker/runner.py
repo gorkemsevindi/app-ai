@@ -184,9 +184,15 @@ def _process_studio(api: ApiClient, adapter, payload: dict, workdir: Path, hb: H
     if payload["kind"] == "studio_shot":
         refs = {k: [download(u, workdir / f"ref_{k}_{i}.img") for i, u in enumerate(urls)]
                 for k, urls in (payload.get("reference_images") or {}).items()}
-        raw, info = adapter.render(spec, refs, workdir, hb.update, hb.cancel)
+        boundary = download(payload["boundary_video_url"], workdir / "boundary.mp4") \
+            if payload.get("boundary_video_url") else None
+        raw, info = adapter.render(spec, refs, workdir, hb.update, hb.cancel, boundary=boundary)
         if hb.lost.is_set():
             return
+        if boundary is not None:  # spec V4 §4: measure transition seam quality
+            from .studio.shots import seam_score
+
+            info["qa"] = {"seam_score": seam_score(boundary, raw, spec["extend"]["direction"])}
         hb.update(0.9, "postprocessing")
         # shots are intermediates: no watermark here, it is applied once on the assembled film
         enc = encode_vertical(raw, workdir, width=w, height=h, watermark=False, job_id=job_id, audio=raw)

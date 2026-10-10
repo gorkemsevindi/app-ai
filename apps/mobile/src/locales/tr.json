@@ -166,7 +166,14 @@
     "bad_storyboard": "Storyboard geçersiz.",
     "too_many_shots": "Çok fazla sahne var.",
     "too_long": "Video çok uzun.",
-    "bad_duration": "Sahne süresi desteklenmiyor."
+    "bad_duration": "Sahne süresi desteklenmiyor.",
+    "source_not_rendered": "Önce bu sahneyi üretmelisin.",
+    "stale_edit": "Proje değişti; düzenlemeyi tekrar önizle.",
+    "nothing_to_undo": "Geri alınacak bir şey yok.",
+    "unknown_shot": "Böyle bir sahne yok.",
+    "bad_edit": "Bu düzenleme yapılamıyor.",
+    "editor_invalid_output": "Düzenleme anlaşılamadı, tekrar dene.",
+    "editor_not_configured": "AI düzenleyici henüz yapılandırılmadı."
   },
   "remix": {
     "slots": "Kim oynasın?",
@@ -211,6 +218,18 @@
       "queued": "sırada",
       "ready": "hazır",
       "failed": "başarısız"
+    },
+    "edit": {
+      "title": "Düzenle (sohbetle)",
+      "placeholder": "Örn: 2. sahneyi 4 saniye uzat, 3. sahneyi sil, 16:9 yap",
+      "preview": "Önizle",
+      "apply": "Uygula",
+      "reject": "Vazgeç",
+      "undo": "Geri al",
+      "duplicate": "Kopyala",
+      "remove": "Sil",
+      "extend": "+4 sn",
+      "summary": "{{added}} eklenen, {{removed}} silinen, {{changed}} değişen sahne · yeni üretim: {{credits}} kredi"
     }
   }
 }

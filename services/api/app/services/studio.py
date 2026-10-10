@@ -53,7 +53,7 @@ DEFAULTS: dict = {
     "shot_provider": "mock_t2v",         # worker adapter name; production sets a real, licensed provider
     "fallback_provider": None,
     "provider_capabilities": {
-        "mock_t2v": ["TEXT_TO_VIDEO", "CHARACTER_REFERENCE"],
+        "mock_t2v": ["TEXT_TO_VIDEO", "CHARACTER_REFERENCE", "VIDEO_EXTEND", "VIDEO_PREPEND"],
         "veo": ["TEXT_TO_VIDEO"],        # reference images only after verification on the chosen model
     },
     "provider_usd_per_second": {"mock_t2v": 0.0},  # real providers must be priced by ops from current docs
@@ -92,6 +92,17 @@ class Dialogue(BaseModel):
     start_s: float = Field(default=0.0, ge=0)
 
 
+class Derive(BaseModel):
+    """A shot made from an existing render: `trim` cuts a range of it (no provider call, no credits);
+    `extend` continues it after its end / before its start (provider call with VIDEO_EXTEND / VIDEO_PREPEND)."""
+
+    kind: Literal["trim", "extend"]
+    from_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    start_s: int | None = Field(default=None, ge=0)
+    end_s: int | None = Field(default=None, ge=1)
+    direction: Literal["end", "start"] | None = None
+
+
 class Shot(BaseModel):
     key: str = Field(pattern=KEY_RE)
     duration_s: int
@@ -101,6 +112,7 @@ class Shot(BaseModel):
     dialogue: list[Dialogue] = Field(default_factory=list, max_length=6)
     caption: str | None = Field(default=None, max_length=300)
     transition: Literal["cut", "fade"] = "cut"
+    derive: Derive | None = None
 
 
 class Scene(BaseModel):
@@ -262,8 +274,15 @@ def validate_storyboard(db: Session, user: User, raw: dict, cfg: dict) -> Storyb
     if sum(s.duration_s for s in shots) > int(cfg["max_total_s"]):
         raise ApiError(422, "too_long", f"at most {cfg['max_total_s']} seconds in total")
     allowed = set(int(x) for x in cfg["allowed_shot_durations"])
-    if any(s.duration_s not in allowed for s in shots):
-        raise ApiError(422, "bad_duration", f"shot durations must be one of {sorted(allowed)}")
+    for s in shots:
+        d = s.derive
+        if d is not None and d.kind == "trim":
+            if d.start_s is None or d.end_s is None or d.end_s <= d.start_s or s.duration_s != d.end_s - d.start_s:
+                raise ApiError(422, "bad_storyboard", f"shot {s.key}: trim range must match its duration")
+        elif s.duration_s not in allowed:
+            raise ApiError(422, "bad_duration", f"shot durations must be one of {sorted(allowed)}")
+        if d is not None and d.kind == "extend" and d.direction is None:
+            raise ApiError(422, "bad_storyboard", f"shot {s.key}: extend needs a direction")
     char_keys = {c.key for c in sb.characters}
     for s in shots:
         if set(s.characters) - char_keys or any(d.character and d.character not in char_keys for d in s.dialogue):
@@ -431,8 +450,15 @@ def _shot_inputs(db: Session, sb: Storyboard, shot: Shot, provider: str) -> dict
         refs.append({"key": k, "name": c.name, "description": c.description,
                      "character_id": str(ch.id) if ch else None,
                      "identity_profile_id": str(ch.identity_profile_id) if ch and ch.identity_profile_id else None})
-    return {"prompt": shot.prompt, "camera": shot.camera, "duration_s": shot.duration_s, "style": sb.style,
-            "aspect_ratio": sb.aspect_ratio, "quality": sb.quality, "provider": provider, "characters": refs}
+    if shot.derive is not None and shot.derive.kind == "trim":
+        # a trim's pixels are fully defined by its source render and the range
+        return {"trim_of": shot.derive.from_hash, "start_s": shot.derive.start_s, "end_s": shot.derive.end_s,
+                "aspect_ratio": sb.aspect_ratio, "provider": provider, "characters": refs}
+    out = {"prompt": shot.prompt, "camera": shot.camera, "duration_s": shot.duration_s, "style": sb.style,
+           "aspect_ratio": sb.aspect_ratio, "quality": sb.quality, "provider": provider, "characters": refs}
+    if shot.derive is not None:  # extension: continuity depends on the source render
+        out["extend"] = {"from_hash": shot.derive.from_hash, "direction": shot.derive.direction}
+    return out
 
 
 def shot_hash(inputs: dict) -> str:
@@ -442,28 +468,43 @@ def shot_hash(inputs: dict) -> str:
 
 
 def needed_capabilities(inputs: dict) -> set[str]:
+    if "trim_of" in inputs:
+        return set()  # cut from an existing render by the assembler
     caps = {"TEXT_TO_VIDEO"}
+    if inputs.get("extend"):
+        caps.add("VIDEO_EXTEND" if inputs["extend"]["direction"] == "end" else "VIDEO_PREPEND")
     if any(c["identity_profile_id"] for c in inputs["characters"]):
         caps.add("CHARACTER_REFERENCE")
     return caps
 
 
 def estimate(db: Session, user: User, project: StudioProject, v: StudioProjectVersion) -> dict:
+    out = estimate_storyboard(db, user, project, v.storyboard)
+    return {**out, "version_id": str(v.id), "version": v.version, "director": v.director}
+
+
+def estimate_storyboard(db: Session, user: User, project: StudioProject, storyboard: dict) -> dict:
     cfg = require_enabled(db)
-    sb = Storyboard.model_validate(v.storyboard)
+    sb = Storyboard.model_validate(storyboard)
     provider = cfg["shot_provider"]
     caps = set(cfg["provider_capabilities"].get(provider, []))
     usd_ps = cfg["provider_usd_per_second"].get(provider)
     cps = float(cfg["credits_per_second"][sb.quality])
     renders = {r.content_hash: r for r in db.execute(select(StudioShotRender).where(
         StudioShotRender.project_id == project.id)).scalars()}
-    rows, new_credits, new_usd, missing, blocked = [], 0, 0.0, set(), []
+    rows, new_credits, new_usd, missing, blocked, parents = [], 0, 0.0, set(), [], []
     for shot in sb.shots():
         inp = _shot_inputs(db, sb, shot, provider)
         h = shot_hash(inp)
         r = renders.get(h)
         state = r.status if r is not None and r.status in ("ready", "queued") else "new"
-        credits_ = int(math.ceil(cps * shot.duration_s))
+        if shot.derive is not None:
+            src = renders.get(shot.derive.from_hash)
+            if src is None or src.status != "ready":
+                parents.append({"shot": shot.key, "reason": "source_not_rendered"})
+            if shot.derive.kind == "trim":
+                state = "derived"
+        credits_ = 0 if state == "derived" else int(math.ceil(cps * shot.duration_s))
         usd = round(usd_ps * shot.duration_s, 4) if usd_ps is not None else None
         lack = needed_capabilities(inp) - caps
         missing |= lack
@@ -484,16 +525,15 @@ def estimate(db: Session, user: User, project: StudioProject, v: StudioProjectVe
         limitations.append("Speech synthesis is not enabled yet: dialogue is shown as captions.")
     if missing:
         limitations.append(f"The current video provider does not support: {', '.join(sorted(missing))}.")
-    return {"version_id": str(v.id), "version": v.version, "provider": provider, "shots": rows,
+    return {"provider": provider, "shots": rows,
             "new_shots": sum(1 for r in rows if r["status"] == "new"),
             "reused_shots": sum(1 for r in rows if r["status"] != "new"),
             "credits": total, "assemble_credits": assemble,
             "est_cost_usd": round(new_usd, 4) if new_usd is not None else None,
-            "missing_capabilities": sorted(missing), "blocked": blocked, "limitations": limitations,
-            "budget_credits": project.budget_credits,
+            "missing_capabilities": sorted(missing), "blocked": blocked, "missing_sources": parents,
+            "limitations": limitations, "budget_credits": project.budget_credits,
             "within_budget": project.budget_credits is None or total <= project.budget_credits,
-            "balance": credits.available(db, user.id),
-            "director": v.director}
+            "balance": credits.available(db, user.id)}
 
 
 # ---------------------------------------------------------------- render + orchestration
@@ -517,6 +557,9 @@ def render(db: Session, user: User, project: StudioProject, version_id: uuid.UUI
     if est["blocked"]:
         raise ApiError(409, "consent_required", "a character's likeness consent is missing or revoked",
                        {"blocked": est["blocked"]})
+    if est["missing_sources"]:
+        raise ApiError(409, "source_not_rendered", "trimmed or extended shots need their source shot rendered first",
+                       {"shots": est["missing_sources"]})
     if est["missing_capabilities"]:
         raise ApiError(422, "capability_unsupported", "the video provider can't do what this storyboard needs",
                        {"missing": est["missing_capabilities"]})
@@ -547,13 +590,18 @@ def render(db: Session, user: User, project: StudioProject, version_id: uuid.UUI
                                                           GenerationJob.idempotency_key == key)).scalar_one_or_none()
         if existing is not None:
             continue
+        spec = {"shot": shot.model_dump(mode="json"), "inputs": inp, "content_hash": row["hash"],
+                "project_version_id": str(v.id), "resolution": RESOLUTIONS[sb.aspect_ratio]}
+        if shot.derive is not None:  # extension: the worker needs the source render's boundary frames
+            src = db.execute(select(StudioShotRender).where(StudioShotRender.project_id == project.id,
+                                                            StudioShotRender.content_hash == shot.derive.from_hash)
+                             ).scalar_one()
+            spec["extend"] = {"direction": shot.derive.direction, "source_video_key": src.video_key}
         job = GenerationJob(
             id=uuid.uuid4(), user_id=user.id, kind=JobKind.studio_shot, status=JobStatus.queued, queue_class=qc,
             studio_project_id=project.id, preferred_model=provider, fallback_model=cfg.get("fallback_provider"),
             idempotency_key=key, credit_cost=row["credits"], max_attempts=s.job_max_attempts,
-            watermark=False, est_cost_usd=row["est_cost_usd"],
-            spec={"shot": shot.model_dump(mode="json"), "inputs": inp, "content_hash": row["hash"],
-                  "project_version_id": str(v.id), "resolution": RESOLUTIONS[sb.aspect_ratio]})
+            watermark=False, est_cost_usd=row["est_cost_usd"], spec=spec)
         db.add(job)
         db.flush()
         r = db.execute(select(StudioShotRender).where(StudioShotRender.project_id == project.id,
@@ -575,10 +623,22 @@ def render(db: Session, user: User, project: StudioProject, version_id: uuid.UUI
 
 def _version_renders(db: Session, project: StudioProject, v: StudioProjectVersion
                      ) -> list[tuple[Shot, StudioShotRender | None]]:
+    """(shot, render that provides its pixels). Trims resolve to their source render."""
     sb = Storyboard.model_validate(v.storyboard)
     renders = {r.content_hash: r for r in db.execute(select(StudioShotRender).where(
         StudioShotRender.project_id == project.id)).scalars()}
-    return [(s, renders.get(shot_hash(_shot_inputs(db, sb, s, "")))) for s in sb.shots()]
+    out = []
+    for s in sb.shots():
+        if s.derive is not None and s.derive.kind == "trim":
+            out.append((s, renders.get(s.derive.from_hash)))
+        else:
+            out.append((s, renders.get(shot_hash(_shot_inputs(db, sb, s, "")))))
+    return out
+
+
+def shot_hashes(db: Session, storyboard: dict) -> dict[str, str]:
+    sb = Storyboard.model_validate(storyboard)
+    return {s.key: shot_hash(_shot_inputs(db, sb, s, "")) for s in sb.shots()}
 
 
 def maybe_assemble(db: Session, project: StudioProject) -> GenerationJob | None:
@@ -599,8 +659,9 @@ def maybe_assemble(db: Session, project: StudioProject) -> GenerationJob | None:
     user = db.get(User, project.user_id)
     timeline, captions, t = [], [], 0
     for shot, r in pairs:
+        trim = shot.derive.start_s if shot.derive is not None and shot.derive.kind == "trim" else 0
         timeline.append({"shot_key": shot.key, "video_key": r.video_key, "duration_ms": shot.duration_s * 1000,
-                         "transition": shot.transition, "start_ms": t})
+                         "transition": shot.transition, "start_ms": t, "trim_start_ms": trim * 1000})
         lines = [(d.start_s, d.text) for d in shot.dialogue] or ([(0.0, shot.caption)] if shot.caption else [])
         for i, (start, text) in enumerate(lines):
             end = lines[i + 1][0] if i + 1 < len(lines) else shot.duration_s
@@ -684,6 +745,9 @@ def build_payload(db: Session, job: GenerationJob) -> dict:
                     IdentityAsset.kind == "photo").order_by(IdentityAsset.created_at).limit(3)).scalars().all()
                 refs[c["key"]] = [st.presign_get(a.storage_key, 3600) for a in assets]
         base["reference_images"] = refs
+        ext = job.spec.get("extend")
+        if ext:
+            base["boundary_video_url"] = st.presign_get(ext["source_video_key"], 3600)
         return base
     base["shots"] = [{**s, "url": st.presign_get(s["video_key"], 3600)} for s in job.spec["timeline"]]
     music_id = (job.spec.get("audio") or {}).get("music_asset_id")

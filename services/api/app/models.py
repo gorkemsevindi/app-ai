@@ -588,6 +588,27 @@ class StudioCharacter(TimestampMixin, Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class StudioEditOperation(Base):
+    """One conversational or timeline edit: typed operations proposed against a base version, previewed with a
+    cost delta, then applied as a new version (or rejected). Nothing is overwritten; undo = restore."""
+
+    __tablename__ = "studio_edit_operations"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    project_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("studio_projects.id", ondelete="CASCADE"), index=True)
+    base_version_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    result_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    source: Mapped[str] = mapped_column(String(20))  # chat|timeline
+    instruction: Mapped[str | None] = mapped_column(String(1000))
+    editor: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    ops: Mapped[list[Any]] = mapped_column(JSONB, default=list)
+    status: Mapped[str] = mapped_column(String(24))  # proposed|needs_clarification|unsupported|applied|rejected
+    clarification: Mapped[str | None] = mapped_column(String(500))
+    preview: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class ConsentReceipt(Base):
     """Evidence that a person allowed a use of their likeness/voice. Revocation stops future use."""
 

@@ -32,7 +32,8 @@ def write_vtt(captions: list[dict], path: Path) -> Path:
     return path
 
 
-def normalize(src: Path, dst: Path, w: int, h: int, dur_s: float, fade: bool, fps: int = 24) -> Path:
+def normalize(src: Path, dst: Path, w: int, h: int, dur_s: float, fade: bool, fps: int = 24,
+              start_s: float = 0.0) -> Path:
     vf = f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},fps={fps},format=yuv420p"
     if fade:
         vf += ",fade=t=in:st=0:d=0.4"
@@ -40,7 +41,8 @@ def normalize(src: Path, dst: Path, w: int, h: int, dur_s: float, fade: bool, fp
         audio_in, amap = [], ["-map", "0:a:0"]
     else:
         audio_in, amap = ["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo"], ["-map", "1:a:0"]
-    _run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(src), *audio_in, "-t", f"{dur_s:.3f}", "-vf", vf,
+    seek = ["-ss", f"{start_s:.3f}"] if start_s else []  # trims cut the existing render (no re-generation)
+    _run(["ffmpeg", "-y", "-loglevel", "error", *seek, "-i", str(src), *audio_in, "-t", f"{dur_s:.3f}", "-vf", vf,
           "-map", "0:v:0", *amap, "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-c:a", "aac",
           "-ar", "48000", "-ac", "2", "-shortest", str(dst)])
     return dst
@@ -51,7 +53,8 @@ def assemble(shots: list[tuple[Path, dict]], spec: dict, workdir: Path, music: P
     parts = []
     for i, (path, s) in enumerate(shots):
         parts.append(normalize(path, workdir / f"n{i:02d}.mp4", w, h, s["duration_ms"] / 1000,
-                               fade=s.get("transition") == "fade" and i > 0))
+                               fade=s.get("transition") == "fade" and i > 0,
+                               start_s=s.get("trim_start_ms", 0) / 1000))
     lst = workdir / "concat.txt"
     lst.write_text("".join(f"file '{p.name}'\n" for p in parts))
     joined = workdir / "joined.mp4"

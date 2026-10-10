@@ -18,6 +18,29 @@ import numpy as np
 from ..adapters.base import AdapterError, Cancelled
 
 
+def frame_at(video: Path, last: bool) -> np.ndarray | None:
+    cap = cv2.VideoCapture(str(video))
+    n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    if last and n > 1:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, n - 1)
+    ok, fr = cap.read()
+    if last and not ok and n > 2:  # some containers report one frame too many
+        cap.set(cv2.CAP_PROP_POS_FRAMES, n - 2)
+        ok, fr = cap.read()
+    cap.release()
+    return fr if ok else None
+
+
+def seam_score(boundary: Path, out: Path, direction: str) -> float | None:
+    """1.0 = the extension starts (or, for a prepend, ends) on exactly the boundary frame of the source shot."""
+    a = frame_at(boundary, last=direction == "end")
+    b = frame_at(out, last=direction == "start")
+    if a is None or b is None:
+        return None
+    b = cv2.resize(b, (a.shape[1], a.shape[0]))
+    return round(1.0 - float(np.mean(cv2.absdiff(a, b))) / 255.0, 4)
+
+
 def compose_prompt(spec: dict) -> str:
     inp = spec["inputs"]
     parts = [inp.get("style") or "", inp["prompt"]]
@@ -39,9 +62,14 @@ class MockT2V:
     def healthcheck(self) -> dict:
         return {"ok": True, "gpu": False}
 
-    def render(self, spec: dict, refs: dict[str, list[Path]], workdir: Path, progress, cancel: threading.Event
-               ) -> tuple[Path, dict]:
+    def render(self, spec: dict, refs: dict[str, list[Path]], workdir: Path, progress, cancel: threading.Event,
+               boundary: Path | None = None) -> tuple[Path, dict]:
         w, h = (int(x) for x in spec["resolution"].split("x"))
+        ext = spec.get("extend")
+        anchor = None
+        if ext and boundary is not None:  # continuity: start (or end, for a prepend) on the source boundary frame
+            fr = frame_at(boundary, last=ext["direction"] == "end")
+            anchor = cv2.resize(fr, (w, h)) if fr is not None else None
         dur, fps = int(spec["shot"]["duration_s"]), 24
         seed = int(spec["content_hash"][:6], 16)
         base = np.array([(seed >> 16) & 255, (seed >> 8) & 255, seed & 255], np.uint8) // 2 + 40
@@ -67,6 +95,10 @@ class MockT2V:
             cv2.putText(fr, text, (16, h - 40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
             if ref_img is not None:
                 fr[70:70 + ref_img.shape[0], 16:16 + ref_img.shape[1]] = ref_img
+            if anchor is not None:  # cross-fade from/to the boundary frame over the first/last second
+                pos = f if ext["direction"] == "end" else dur * fps - 1 - f
+                alpha = max(0.0, 1.0 - pos / fps)
+                fr = cv2.addWeighted(anchor, alpha, fr, 1.0 - alpha, 0)
             wr.write(fr)
             if f % fps == 0:
                 progress(0.1 + 0.7 * f / (dur * fps))
@@ -98,10 +130,12 @@ class VeoShot:
     def healthcheck(self) -> dict:
         return {"ok": bool(self._client or (os.environ.get("GEMINI_API_KEY") and self.model)), "gpu": False}
 
-    def render(self, spec: dict, refs: dict[str, list[Path]], workdir: Path, progress, cancel: threading.Event
-               ) -> tuple[Path, dict]:
+    def render(self, spec: dict, refs: dict[str, list[Path]], workdir: Path, progress, cancel: threading.Event,
+               boundary: Path | None = None) -> tuple[Path, dict]:
         from google.genai import types
 
+        if spec.get("extend"):  # video extension via the API is not verified for this account yet
+            raise AdapterError("capability_unsupported", "Veo extension is not enabled", retryable=False)
         aspect = self.ASPECTS.get(spec["resolution"])
         if aspect is None:
             raise AdapterError("capability_unsupported", f"{spec['resolution']} is not supported", retryable=False)

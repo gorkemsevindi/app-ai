@@ -2,10 +2,10 @@ import { useLocalSearchParams } from 'expo-router';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Alert, ScrollView, View } from 'react-native';
+import { Alert, ScrollView, TextInput, View } from 'react-native';
 
-import { Body, Button, Card, Title } from '@/components/ui';
-import { api, ApiError, type StudioEstimate, type StudioProject } from '@/lib/api';
+import { Body, Button, Card, Chip, Title } from '@/components/ui';
+import { api, ApiError, type StudioEdit, type StudioEstimate, type StudioProject } from '@/lib/api';
 import { errorMessage } from '@/lib/errors';
 import { radius, spacing, useColors } from '@/lib/theme';
 
@@ -20,6 +20,8 @@ export default function StudioProjectScreen() {
   const [p, setP] = useState<StudioProject | null>(null);
   const [est, setEst] = useState<StudioEstimate | null>(null);
   const [busy, setBusy] = useState(false);
+  const [instruction, setInstruction] = useState('');
+  const [proposal, setProposal] = useState<StudioEdit | null>(null);
   const idem = useRef(newKey());
   const player = useVideoPlayer(p?.output?.video_url ?? null, (pl) => { pl.loop = true; });
 
@@ -67,6 +69,32 @@ export default function StudioProjectScreen() {
     ]);
   };
 
+  // Chat and timeline buttons send the same typed operations; chat edits are previewed (diff + cost) first.
+  const propose = async (body: Record<string, unknown>) => {
+    try {
+      const e = await api<StudioEdit>(`/studio/projects/${id}/edits`, { body });
+      if (e.status === 'applied') { setProposal(null); await load(); } else setProposal(e);
+    } catch (e) {
+      Alert.alert(errorMessage(t, e));
+    }
+  };
+  const decide = async (apply: boolean) => {
+    if (!proposal) return;
+    try {
+      await api(`/studio/projects/${id}/edits/${proposal.id}/${apply ? 'apply' : 'reject'}`, { method: 'POST' });
+      setProposal(null);
+      setInstruction('');
+      await load();
+    } catch (e) {
+      Alert.alert(errorMessage(t, e));
+    }
+  };
+  const timeline = (op: Record<string, unknown>) => propose({ source: 'timeline', auto_apply: true, ops: [op] });
+  const undo = async () => {
+    try { await api(`/studio/projects/${id}/undo`, { method: 'POST' }); await load(); }
+    catch (e) { Alert.alert(errorMessage(t, e)); }
+  };
+
   if (!p) return <View style={{ flex: 1, backgroundColor: c.bg }} />;
   const sb = p.current_version?.storyboard;
   const statusOf = (k: string) => p.shots.find((s) => s.key === k)?.status;
@@ -86,8 +114,40 @@ export default function StudioProjectScreen() {
           <Body muted>{s.prompt}</Body>
           {s.caption ? <Body>{`“${s.caption}”`}</Body> : null}
           {(s.dialogue ?? []).map((d, j) => <Body key={j}>{`${d.character ?? ''}: ${d.text}`}</Body>)}
+          {p.status !== 'rendering' ? (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+              {i > 0 ? <Chip label="↑" onPress={() => timeline({ op: 'move_shot', shot: s.key, before: sb.scenes.flatMap((x) => x.shots)[i - 1].key })} /> : null}
+              <Chip label={t('studio.edit.duplicate')} onPress={() => timeline({ op: 'duplicate_shot', shot: s.key })} />
+              <Chip label={t('studio.edit.remove')} onPress={() => timeline({ op: 'remove_shot', shot: s.key })} />
+              {statusOf(s.key) === 'ready' && !s.derive ? (
+                <Chip label={t('studio.edit.extend')} onPress={() => propose({ source: 'timeline', ops: [{ op: 'extend_shot', shot: s.key, direction: 'end', seconds: 4 }] })} />
+              ) : null}
+            </View>
+          ) : null}
         </Card>
       ))}
+      <Card style={{ gap: spacing.sm }}>
+        <Body>{t('studio.edit.title')}</Body>
+        <TextInput accessibilityLabel={t('studio.edit.title')} placeholder={t('studio.edit.placeholder')} value={instruction}
+          onChangeText={setInstruction} maxLength={1000} placeholderTextColor={c.textMuted}
+          style={{ borderWidth: 1, borderColor: c.border, borderRadius: radius.md, padding: spacing.sm, color: c.text }} />
+        <Button title={t('studio.edit.preview')} variant="secondary" disabled={instruction.trim().length < 2}
+          onPress={() => propose({ instruction, source: 'chat' })} />
+        {proposal ? (
+          proposal.status === 'proposed' && proposal.cost && proposal.diff ? (
+            <View style={{ gap: 4 }}>
+              <Body>{t('studio.edit.summary', { added: proposal.diff.added.length, removed: proposal.diff.removed.length,
+                changed: proposal.diff.changed.length, credits: proposal.cost.render_credits_after })}</Body>
+              {proposal.notes.map((n, i) => <Body key={i} muted>{n}</Body>)}
+              <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+                <Button title={t('studio.edit.apply')} onPress={() => decide(true)} />
+                <Button title={t('studio.edit.reject')} variant="secondary" onPress={() => decide(false)} />
+              </View>
+            </View>
+          ) : <Body muted>{proposal.clarification ?? ''}</Body>
+        ) : null}
+        <Button title={t('studio.edit.undo')} variant="secondary" onPress={undo} />
+      </Card>
       {[...(est?.limitations ?? [])].map((l, i) => <Body key={i} muted>{`⚠︎ ${l}`}</Body>)}
       {est ? (
         <Body>{t('studio.estimate', { credits: est.credits, n: est.new_shots, r: est.reused_shots, balance: est.balance })}</Body>

@@ -329,3 +329,99 @@ Stage C:
 - shot extend / prepend;
 - timeline trim, split and reorder;
 - revision preview with cost delta.
+
+## Stage C: conversational editing, extend, trim/split/reorder, revisions
+
+Feature flag: `studio` (same as Stage B). Migration: `0008_studio_edits` (additive, reversible).
+
+### What works
+
+**Typed, auditable edit operations**
+- Chat and the timeline produce the same operations (spec V4 §5): `set_shot`, `set_dialogue`, `remove_shot`, `duplicate_shot`, `move_shot`, `split_shot`, `trim_shot`, `extend_shot`, `set_style`, `set_aspect_ratio`, `set_music`, `set_captions`, `replace_character` and `unsupported`.
+- Each edit is stored in `studio_edit_operations` with its source, instruction, editor, operations, status, diff, cost delta and the base and result versions.
+
+**Proposal first, never a silent overwrite**
+- `POST /studio/projects/{id}/edits` creates a proposal. It contains:
+  - the new storyboard, validated exactly like a manual edit (moderation, consent, limits);
+  - a diff of added, removed, changed and reordered shots and the duration change;
+  - the **cost delta**: credits before and after, new vs reused shots, missing capabilities.
+- Nothing changes until `apply`, which writes a new immutable version. `reject` discards the proposal.
+- Applying a proposal made against an older version returns 409 `stale_edit`, so an edit can never silently drop another one.
+- `undo` keeps walking back through the versions. `restore` still works for any version.
+- Timeline buttons use `auto_apply`. They still go through the same validation and versioning, and are audited.
+
+**Free cuts of existing renders**
+- Trimming or splitting a shot that is already rendered creates `derive: trim` shots. The assembler cuts the existing render, so this costs **0 credits** and never calls the provider.
+- Trims of trims are re-based onto the original render.
+- If the shot is not rendered yet, the edit becomes ordinary new-length shots, and the proposal explains this.
+- Duplicating a shot produces the same hash, so the render is reused.
+
+**Extend and prepend**
+- An extension needs the source shot to be rendered first (409 `source_not_rendered` otherwise). It requires the VIDEO_EXTEND or VIDEO_PREPEND capability.
+- Only the extension is charged: duration × credits per second.
+- The worker downloads the source render. The mock provider starts the extension on the source's last frame (or, for a prepend, ends on its first frame) and fades into the new content.
+- **Seam quality is measured**: `seam_score` compares the two boundary frames (1.0 = identical) and is stored in the run's quality data. In the test it was above 0.95; without continuity it falls below 0.9.
+- Veo refuses extension safely (`capability_unsupported`) until it is verified on the account.
+- Inpainting (`/shots/{key}/inpaint`) is rejected with `capability_unsupported` because no provider offers it.
+
+**Editors (instruction → operations)**
+- `rule_based` (default) understands common Turkish and English commands. It is labelled "(not AI)". Examples:
+  - "2. sahneyi 4 saniye uzat" (extend shot 2 by 4 seconds);
+  - "remove shot 3";
+  - "3. sahneyi 1. sahnenin önüne taşı" (move shot 3 before shot 1);
+  - "split shot 1 at 2 seconds";
+  - "kısalt" (shorten), "kopyala" (duplicate), "16:9", "müziği kaldır" (remove the music), "altyazıyı göm" (burn in the captions).
+- Ambiguous requests get a clarification question (which shot, how many seconds, where to move).
+- Requests that need object or background edits or relighting come back as `unsupported` with the missing capability. They are never faked.
+- `gemini` maps the instruction to the same operation schema (`google-genai`, JSON schema). The model can never write a version itself: invalid output returns 502 `editor_invalid_output`, and invented shot keys return 422.
+
+**Mobile**
+- The project screen has a chat edit box: preview (diff and new rendering cost) → apply or discard.
+- Undo button.
+- Per-shot timeline buttons: move up, duplicate, remove, and +4 s extend for rendered shots.
+
+### API (new)
+
+`POST/GET /studio/projects/{id}/edits`, `.../edits/{e}/apply`, `.../edits/{e}/reject`, `.../undo`, `.../shots/{key}/extend`, `.../shots/{key}/inpaint`.
+
+### Config (`studio` remote config)
+
+- `editor`: `rule_based` or `gemini`.
+- `editor_model`: defaults to `director_model`.
+- `provider_capabilities`: `mock_t2v` has VIDEO_EXTEND and VIDEO_PREPEND; `veo` has only TEXT_TO_VIDEO until verified.
+
+### Tests
+
+**API: 84/84 passed (4 new)**
+- Clarification and unsupported answers, proposals that change nothing until applied.
+- Timeline apply, reject, stale protection, auto-apply and undo chain; invalid operations and unknown shots.
+- Gemini editor: validated output, clarification, invalid output.
+- **Real worker run:**
+  - split a rendered shot and trim another: 0 credits;
+  - extend a shot by 4 s: only +8 credits, then render → only the extension and the assembly run;
+  - film length 15 s;
+  - seam score above 0.95;
+  - a Veo project reports VIDEO_EXTEND as missing.
+
+**Other checks**
+- Worker 20/20 passed (2 new): mock extension and prepend seams, Veo refuses extension.
+- Mobile `tsc` passes and node tests 5/5.
+- `ruff` clean; `alembic check` shows no drift.
+
+### Known limitations
+
+- **No real provider supports extension yet.** Veo's video-extension API is not verified, so it is turned off.
+- **Object, background, relight and inpaint edits are not possible.** No provider has the capability; such requests are answered honestly as unsupported.
+- The rule-based editor covers common commands only. Free-form requests need the Gemini editor, which requires the key.
+- Trims and splits are in whole seconds.
+- The mobile timeline has buttons, not drag-and-drop.
+
+### Next step
+
+Stage D: creator marketplace and licensed AI actors.
+- Creator profiles; template submission and moderation.
+- Versioned RevenuePolicy, an append-only creator earnings ledger, settlement snapshots, risk holds and creator analytics.
+- Referral earnings, computed from the Stage A3 attributions.
+- Actor marketplace behind its own flag. It must not be switched on before legal review.
+
+Business decisions are needed before launch: revenue-share percentage, referral commission, minimum payout and settlement delay.

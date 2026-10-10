@@ -246,3 +246,117 @@ def revoke(character_id: uuid.UUID, request: Request, user: User = Depends(curre
     return _char_out(db, ch)
 
 
+
+
+# ---------------------------------------------------------------- Stage C: editing (chat + timeline)
+
+class EditIn(BaseModel):
+    instruction: str | None = Field(default=None, min_length=2, max_length=1000)
+    ops: list[dict] | None = Field(default=None, max_length=20)
+    base_version_id: uuid.UUID | None = None
+    source: str = Field(default="chat", pattern=r"^(chat|timeline)$")
+    auto_apply: bool = False  # timeline buttons: apply right away (still validated + versioned)
+
+
+@router.post("/projects/{project_id}/edits", status_code=201)
+def propose_edit(project_id: uuid.UUID, body: EditIn, request: Request, user: User = Depends(current_user),
+                 db: Session = Depends(get_db)):
+    from ..services import studio_edits
+
+    ratelimit.hit("studio_edit", str(user.id), 30)
+    p = studio.get_project(db, user, project_id)
+    e = studio_edits.propose(db, user, p, body.base_version_id, body.instruction, body.ops, body.source)
+    if body.auto_apply and e.status == "proposed":
+        v = studio_edits.apply(db, user, p, e)
+        audit(db, user.id, "studio.edit_applied", "studio_project", str(p.id),
+              {"edit_id": str(e.id), "version": v.version, "ops": [o["op"] for o in e.ops]}, ip=client_ip(request))
+    db.commit()
+    return studio_edits.edit_out(e)
+
+
+@router.get("/projects/{project_id}/edits")
+def list_edits(project_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from ..models import StudioEditOperation
+    from ..services import studio_edits
+
+    p = studio.get_project(db, user, project_id)
+    rows = db.execute(select(StudioEditOperation).where(StudioEditOperation.project_id == p.id)
+                      .order_by(StudioEditOperation.created_at.desc()).limit(50)).scalars().all()
+    return {"items": [studio_edits.edit_out(e) for e in rows]}
+
+
+@router.post("/projects/{project_id}/edits/{edit_id}/apply")
+def apply_edit(project_id: uuid.UUID, edit_id: uuid.UUID, request: Request, user: User = Depends(current_user),
+               db: Session = Depends(get_db)):
+    from ..services import studio_edits
+
+    p = studio.get_project(db, user, project_id)
+    p = db.execute(select(StudioProject).where(StudioProject.id == p.id).with_for_update()).scalar_one()
+    e = studio_edits.get_edit(db, p, edit_id)
+    v = studio_edits.apply(db, user, p, e)
+    audit(db, user.id, "studio.edit_applied", "studio_project", str(p.id),
+          {"edit_id": str(e.id), "version": v.version, "ops": [o["op"] for o in e.ops]}, ip=client_ip(request))
+    est = studio.estimate(db, user, p, v)
+    db.commit()
+    return {**studio_edits.edit_out(e), "version": v.version, "estimate": est}
+
+
+@router.post("/projects/{project_id}/edits/{edit_id}/reject")
+def reject_edit(project_id: uuid.UUID, edit_id: uuid.UUID, user: User = Depends(current_user),
+                db: Session = Depends(get_db)):
+    from ..errors import ApiError
+    from ..services import studio_edits
+
+    p = studio.get_project(db, user, project_id)
+    e = studio_edits.get_edit(db, p, edit_id)
+    if e.status == "applied":
+        raise ApiError(409, "edit_not_applicable", "applied edits are undone with /undo")
+    e.status = "rejected"
+    db.commit()
+    return studio_edits.edit_out(e)
+
+
+@router.post("/projects/{project_id}/undo", status_code=201)
+def undo(project_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from ..services import studio_edits
+
+    p = studio.get_project(db, user, project_id)
+    v = studio_edits.undo(db, user, p)
+    est = studio.estimate(db, user, p, v)
+    db.commit()
+    return {"version_id": str(v.id), "version": v.version, "estimate": est}
+
+
+class ExtendIn(BaseModel):
+    direction: str = Field(default="end", pattern=r"^(end|start)$")
+    seconds: int = Field(ge=1, le=20)
+    prompt: str | None = Field(default=None, min_length=5, max_length=1500)
+
+
+@router.post("/projects/{project_id}/shots/{shot_key}/extend", status_code=201)
+def extend_shot(project_id: uuid.UUID, shot_key: str, body: ExtendIn, user: User = Depends(current_user),
+                db: Session = Depends(get_db)):
+    """Timeline shortcut: propose an extension (or prepend) of a rendered shot, with its incremental price."""
+    from ..services import studio_edits
+
+    p = studio.get_project(db, user, project_id)
+    op = {"op": "extend_shot", "shot": shot_key, "direction": body.direction, "seconds": body.seconds}
+    if body.prompt:
+        op["prompt"] = body.prompt
+    e = studio_edits.propose(db, user, p, None, None, [op], "timeline")
+    db.commit()
+    return studio_edits.edit_out(e)
+
+
+@router.post("/projects/{project_id}/shots/{shot_key}/inpaint")
+def inpaint_shot(project_id: uuid.UUID, shot_key: str, user: User = Depends(current_user),
+                 db: Session = Depends(get_db)):
+    """Video inpainting is offered only when a provider supports it; none does yet -> safe rejection."""
+    from ..errors import ApiError
+
+    studio.get_project(db, user, project_id)
+    _, cfg = studio.config(db)
+    if "VIDEO_INPAINT" not in set(cfg["provider_capabilities"].get(cfg["shot_provider"], [])):
+        raise ApiError(422, "capability_unsupported", "the video provider can't inpaint",
+                       {"missing": ["VIDEO_INPAINT"]})
+    raise ApiError(501, "not_implemented", "inpainting is not implemented yet")

@@ -18,7 +18,7 @@ export class ApiError extends Error {
   }
 }
 
-type Json = Record<string, unknown> | unknown[] | null;
+export type Json = Record<string, unknown> | unknown[] | null;
 
 let refreshing: Promise<boolean> | null = null;
 
@@ -128,6 +128,7 @@ export type MultiConfig = {
 export type StudioShot = {
   key: string; duration_s: number; prompt: string; camera?: string; caption?: string | null;
   dialogue?: { character?: string | null; text: string; start_s: number }[]; transition?: 'cut' | 'fade';
+  derive?: { kind: 'trim' | 'extend' } | null;
 };
 export type Storyboard = {
   title: string; language: string; aspect_ratio: '9:16' | '16:9' | '1:1'; style: string;
@@ -145,4 +146,12 @@ export type StudioProject = {
     director: { provider?: string; label?: string } } | null;
   shots: { key: string; status: string }[];
   output: { video_url: string; captions_url: string | null; duration_ms: number } | null;
+};
+export type StudioEdit = {
+  id: string; status: 'proposed' | 'needs_clarification' | 'unsupported' | 'applied' | 'rejected';
+  clarification: string | null; editor: { label?: string }; notes: string[];
+  diff: { added: string[]; removed: string[]; changed: string[]; reordered: boolean;
+          duration_s: { before: number; after: number } } | null;
+  cost: { render_credits_after: number; delta_credits: number; new_shots: number; reused_shots: number } | null;
+  missing_capabilities: string[];
 };

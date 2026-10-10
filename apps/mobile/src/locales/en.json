@@ -166,7 +166,14 @@
     "bad_storyboard": "The storyboard is invalid.",
     "too_many_shots": "Too many shots.",
     "too_long": "The video is too long.",
-    "bad_duration": "Unsupported shot duration."
+    "bad_duration": "Unsupported shot duration.",
+    "source_not_rendered": "Render this shot first.",
+    "stale_edit": "The project changed; preview the edit again.",
+    "nothing_to_undo": "Nothing to undo.",
+    "unknown_shot": "There is no such shot.",
+    "bad_edit": "This edit isn't possible.",
+    "editor_invalid_output": "Couldn't understand the edit, please try again.",
+    "editor_not_configured": "The AI editor isn't configured yet."
   },
   "remix": {
     "slots": "Who stars in it?",
@@ -211,6 +218,18 @@
       "queued": "queued",
       "ready": "ready",
       "failed": "failed"
+    },
+    "edit": {
+      "title": "Edit (chat)",
+      "placeholder": "E.g. extend shot 2 by 4 seconds, remove shot 3, make it 16:9",
+      "preview": "Preview",
+      "apply": "Apply",
+      "reject": "Discard",
+      "undo": "Undo",
+      "duplicate": "Duplicate",
+      "remove": "Remove",
+      "extend": "+4 s",
+      "summary": "{{added}} added, {{removed}} removed, {{changed}} changed shots · new rendering: {{credits}} credits"
     }
   }
 }
