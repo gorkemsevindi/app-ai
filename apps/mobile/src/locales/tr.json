@@ -180,7 +180,19 @@
     "terms_required": "Creator şartlarını kabul etmelisin.",
     "license_invalid": "Bu aktör lisansı kullanılamıyor.",
     "license_terms_violation": "Bu kullanım lisanslı aktörün şartlarına aykırı.",
-    "territory_not_licensed": "Bu aktör ülkende lisanslı değil."
+    "territory_not_licensed": "Bu aktör ülkende lisanslı değil.",
+    "minor_not_allowed": "Karakterler yetişkin olmalı.",
+    "impersonation_not_allowed": "Gerçek ya da ünlü bir kişiyi değil, özgün bir karakteri tarif et.",
+    "rights_conflict": "Korunan bir kişi ya da eser adı geçiyor.",
+    "rights_declaration_required": "Lütfen hak beyanını onayla.",
+    "license_required": "Bu karakter için önce lisans gerekiyor.",
+    "cast_resolution_required": "Önce etiketlenen karakterleri kadroya ekle ya da seç.",
+    "identity_not_locked": "Önce karakter kimliğini kilitle.",
+    "creator_review_required": "Kilitlemeden önce tüm görünümleri onayla.",
+    "identity_validation_failed": "Kilitlemeden önce başarısız veya eksik görünümleri düzelt.",
+    "voice_cloning_disabled": "Ses klonlama kullanılamıyor.",
+    "cast_unavailable": "Kadrodaki bir karakter şu anda kullanılamıyor.",
+    "immutable_trait_change": "Bu özellikler kimliği tanımlar: yeni bir ana sürüm oluştur."
   },
   "remix": {
     "slots": "Kim oynasın?",
@@ -286,5 +298,93 @@
     "note": "Videoların ve prompt'ların başka kullanıcılarla paylaşılmaz. Teknik iyileştirme sadece süre, başarı ve kalite sayılarını kullanır.",
     "delete": "Öğrenme verilerimi sil",
     "deleted": "Öğrenme verilerin silindi."
+  },
+  "character": {
+    "title": "Karakterler",
+    "comingSoon": "Karakter oluşturma yakında.",
+    "create": "Özgün bir dijital oyuncu oluştur",
+    "name": "Görünen ad",
+    "handle": "Kullanıcı adı (örn. mert)",
+    "description": "Açıklama",
+    "descriptionHint": "Özgün, yetişkin, kurgusal bir karakter tarif et: yüz, saç, stil, kişilik, ses.",
+    "aesthetic": {
+      "photorealistic": "Fotogerçekçi",
+      "stylized": "Stilize",
+      "animation": "Animasyon"
+    },
+    "age": {
+      "young_adult": "Genç yetişkin",
+      "adult": "Yetişkin",
+      "middle_aged": "Orta yaş",
+      "senior": "Yaşlı"
+    },
+    "rights": "Bu karakter benim özgün eserim, yetişkin, gerçek bir kişiye dayanmıyor ve üçüncü taraf fikri mülkiyet içermiyor. Karakter koşullarını kabul ediyorum.",
+    "createCta": "Karakter oluştur",
+    "lockedBadge": "kimlik kilitli",
+    "status": {
+      "draft": "Taslak",
+      "private": "Özel",
+      "unlisted": "Liste dışı",
+      "public": "Herkese açık",
+      "suspended": "Askıda",
+      "deleted": "Silindi"
+    },
+    "version": {
+      "draft": "ana kimliği seç",
+      "master_approved": "ana kimlik onaylandı",
+      "built": "kimlik sayfasını incele",
+      "locked": "kilitli",
+      "superseded": "eski sürüm"
+    },
+    "asset": {
+      "pending": "üretiliyor",
+      "ready": "hazır",
+      "approved": "onaylandı",
+      "rejected": "reddedildi",
+      "failed": "başarısız"
+    },
+    "lockedAs": "Kilitli kimlik: v{{v}}. AI Studio'da @kullanıcıadı ile oyuncu kadrosuna ekle.",
+    "previewsHint": "Ön izlemeler üret ve ana kimliği seç. Onaylamadan önce istediğin kadar yeniden üretebilirsin.",
+    "previews": "Ön izleme üret",
+    "reroll": "Yeniden üret",
+    "approveMaster": "Bu görsel ana kimlik olsun mu?",
+    "build": "Çok açılı kimlik sayfasını üret",
+    "sheet": "Kimlik sayfası (her görünümü onayla veya reddet)",
+    "notFaceView": "burada yüz eşleştirmesi anlamlı değil",
+    "confirm": "{{n}} görsel için {{credits}} kredi",
+    "report": "Doğrulama: {{verdict}} ({{method}})",
+    "verified": "Yüz gömme kontrolü geçti ve tüm görünümler onaylandı.",
+    "measuredOnly": "Ölçüldü, garanti değil: yalnızca vekil metrikler var ya da görünümler henüz onaylanmadı.",
+    "failedViews": "Onarılmalı: {{v}}",
+    "repair": "Reddedilen / başarısız görünümleri yeniden üret",
+    "lock": "Kimliği kilitle",
+    "verdict": {
+      "pass": "geçti",
+      "warn": "inceleme gerekli",
+      "fail": "başarısız",
+      "insufficient": "ölçülemedi"
+    }
+  },
+  "cast": {
+    "title": "Oyuncu kadrosu",
+    "mention": "Karakter etiketi",
+    "add": "Kadroya ekle",
+    "licensed": "lisanslı",
+    "lock": {
+      "standard": "Standart",
+      "strong": "Güçlü",
+      "strict": "Katı"
+    },
+    "lockHint": {
+      "standard": "En iyi çaba: kimlik ölçülür ve raporlanır.",
+      "strong": "Daha fazla kimlik koşullandırma ve kontrol (daha yüksek fiyat).",
+      "strict": "Kimlik eşiğinin altındaki çekimler birkaç kez yeniden denenir (başarısız denemeler iade edilir), sonra açıkça başarısız olur."
+    },
+    "resolution": {
+      "ambiguous": "Birden fazla karakter eşleşiyor: birini seç.",
+      "not_found": "Karakter bulunamadı.",
+      "needs_cast": "Bu karakteri kadroya ekle.",
+      "bound": "Zaten kadroda."
+    }
   }
 }

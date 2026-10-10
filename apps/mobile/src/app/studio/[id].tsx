@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Alert, ScrollView, TextInput, View } from 'react-native';
 
+import { CastPanel } from '@/components/CastPanel';
 import { Body, Button, Card, Chip, Title } from '@/components/ui';
 import { api, ApiError, type StudioEdit, type StudioEstimate, type StudioProject } from '@/lib/api';
 import { errorMessage } from '@/lib/errors';
@@ -135,6 +136,7 @@ export default function StudioProjectScreen() {
           ) : null}
         </Card>
       ))}
+      <CastPanel projectId={id} onChange={load} />
       <Card style={{ gap: spacing.sm }}>
         <Body>{t('studio.edit.title')}</Body>
         <TextInput accessibilityLabel={t('studio.edit.title')} placeholder={t('studio.edit.placeholder')} value={instruction}

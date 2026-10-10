@@ -78,6 +78,10 @@ def queue_class_for(user: User) -> str:
 
 def _refund(db: Session, job: GenerationJob, why: str) -> None:
     credits.release(db, job, why)
+    if job.kind == JobKind.studio_shot and (job.spec or {}).get("character_usage"):
+        from . import character_market
+
+        character_market.on_job_released(db, job)  # no royalty for refunded usage
 
 
 def _disabled_models(db: Session) -> set[str]:
@@ -230,6 +234,10 @@ def _on_terminal_failure(db: Session, job: GenerationJob) -> None:
         from . import studio
 
         studio.on_job_failed(db, job)
+    if job.kind == JobKind.character_asset:
+        from . import characters
+
+        characters.on_asset_failed(db, job)
 
 
 def refuse_dispatch(db: Session, job: GenerationJob, code: str, message: str) -> None:
@@ -341,6 +349,9 @@ def complete(db: Session, job_id: uuid.UUID, worker_id: str, attempt: int, outpu
         transition(job, JobStatus.completed)
         return job
 
+    if job.kind == JobKind.character_asset:
+        return _complete_character_asset(db, job, output, moderation_report)
+
     storage = get_storage()
     video_key = output_key(job, "video.mp4")
     head = storage.head(video_key)
@@ -357,6 +368,18 @@ def complete(db: Session, job_id: uuid.UUID, worker_id: str, attempt: int, outpu
         transition(job, JobStatus.failed)
         _refund(db, job, "output_blocked")
         return job
+
+    if job.kind == JobKind.studio_shot and (job.spec or {}).get("identity_gate"):
+        from . import studio
+
+        code = studio.identity_gate(db, job, metrics)
+        if code:  # strict character lock: not delivered, refunded; bounded retry or explicit failure
+            storage.delete(video_key)
+            job.error_code, job.error_message = code, "the character identity check did not pass"
+            transition(job, JobStatus.failed)
+            _refund(db, job, code)
+            studio.on_identity_failed(db, job)
+            return job
 
     thumb_key = output_key(job, "thumb.jpg")
     db.add(GenerationOutput(
@@ -376,13 +399,38 @@ def complete(db: Session, job_id: uuid.UUID, worker_id: str, attempt: int, outpu
     transition(job, JobStatus.completed)
     credits.settle(db, job)
     if job.billing_state == "settled":
-        from . import creators
+        from . import character_market, creators
 
+        character_market.on_job_settled(db, job)  # V6 waterfall: contractual royalties first
         creators.on_job_settled(db, job)
     if job.studio_project_id is not None:
         from . import studio
 
         studio.on_job_completed(db, job, video_key, int(output.get("duration_ms", 5000)))
+    return job
+
+
+def _complete_character_asset(db: Session, job: GenerationJob, output: dict, report: dict) -> GenerationJob:
+    from . import characters
+
+    decision = moderation.check_output(report)
+    if not decision.allowed:
+        db.add(ModerationAction(job_id=job.id, target_user_id=job.user_id, source="auto_output",
+                                action="block_output", category=decision.category, note=",".join(decision.reasons)))
+        get_storage().delete(characters.asset_key(job))
+        job.error_code, job.error_message = "output_blocked", "the image did not pass our safety checks"
+        transition(job, JobStatus.failed)
+        _refund(db, job, "output_blocked")
+        characters.on_asset_failed(db, job)
+        return job
+    err = characters.on_asset_completed(db, job, output)
+    if err:
+        _requeue_or_fail(db, job, err, "worker reported success but no image was stored")
+        return job
+    job.progress = 1.0
+    job.error_code = job.error_message = None
+    transition(job, JobStatus.completed)
+    credits.settle(db, job)
     return job
 
 
@@ -436,6 +484,10 @@ def build_worker_payload(db: Session, job: GenerationJob) -> dict:
         from . import studio
 
         return studio.build_payload(db, job)
+    if job.kind == JobKind.character_asset:
+        from . import characters
+
+        return characters.build_payload(db, job)
     if job.kind != JobKind.template:
         from . import multiperson
 

@@ -106,3 +106,48 @@ def ready_profile(client, headers, storage, n=5):
         assert r.status_code == 200, r.text
     assert r.json()["status"] == "ready"
     return pid
+
+
+@pytest.fixture
+def drain(client, storage, monkeypatch):
+    """Runs queued jobs through the real worker code (mock image/video providers, real QC + ffmpeg)."""
+    import shutil
+    import sys
+    import tempfile
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "worker"))
+    from fastapi.testclient import TestClient
+    from worker import runner
+    from worker.client import ApiClient
+    from worker.registry import FACTORIES
+
+    from app.main import app
+
+    def fake_download(url, dest, max_bytes=0):
+        dest.write_bytes(storage.objects[url.split("memory://get/", 1)[1].split("?", 1)[0]][0])
+        return dest
+
+    def fake_upload(url, path, mime):
+        storage.put(url.split("memory://put/", 1)[1], Path(path).read_bytes(), mime)
+
+    monkeypatch.setattr(runner, "download", fake_download)
+    monkeypatch.setattr(runner, "upload", fake_upload)
+    adapters = {n: FACTORIES[n]() for n in ("mock_image", "mock_t2v", "studio_assembler")}
+    wc = TestClient(app)
+    wc.headers["Authorization"] = "Bearer test-worker-token"
+    api = ApiClient.__new__(ApiClient)
+    api.worker_id, api.http = "char-worker", wc
+
+    def run() -> int:
+        n = 0
+        while (payload := api.claim(list(adapters), "test", "cpu")) is not None:
+            wd = Path(tempfile.mkdtemp())
+            try:
+                runner.process(api, adapters, payload, wd)
+            finally:
+                shutil.rmtree(wd, ignore_errors=True)
+            n += 1
+        return n
+
+    return run

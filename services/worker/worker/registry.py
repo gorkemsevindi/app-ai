@@ -7,6 +7,7 @@ import os
 
 from .adapters import command
 from .adapters.mock import MockAdapter
+from .characters.images import GeminiImage, MockImage
 from .multiperson import adapters as mp
 from .studio.shots import MockT2V, VeoShot
 
@@ -34,6 +35,9 @@ FACTORIES = {
     "mock_t2v": MockT2V,
     "veo": VeoShot,
     "studio_assembler": StudioAssembler,
+    # V6 character identity images
+    "mock_image": MockImage,
+    "gemini_image": GeminiImage,
 }
 
 

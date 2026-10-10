@@ -74,13 +74,14 @@ class MockT2V:
         dur, fps = int(spec["shot"]["duration_s"]), 24
         seed = int(spec["content_hash"][:6], 16)
         base = np.array([(seed >> 16) & 255, (seed >> 8) & 255, seed & 255], np.uint8) // 2 + 40
-        ref_img = None
-        for paths in refs.values():
+        ref_imgs = []  # first reference of each character, side by side (identity QC can find them)
+        for paths in list(refs.values())[:3]:
             for p in paths:
                 img = cv2.imread(str(p))
                 if img is not None:
-                    ref_img = cv2.resize(img, (w // 4, w // 4))
+                    ref_imgs.append(cv2.resize(img, (w // 4, w // 4)))
                     break
+        ref_img = ref_imgs[0] if ref_imgs else None
         out = workdir / "shot_raw.mp4"
         wr = cv2.VideoWriter(str(out), cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
         text = spec["shot"]["prompt"][:38]
@@ -94,8 +95,10 @@ class MockT2V:
             cv2.circle(fr, (x, h // 2), w // 10, (230, 230, 230), -1)
             cv2.putText(fr, "MOCK", (16, 48), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 2)
             cv2.putText(fr, text, (16, h - 40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-            if ref_img is not None:
-                fr[70:70 + ref_img.shape[0], 16:16 + ref_img.shape[1]] = ref_img
+            for i, ri in enumerate(ref_imgs):
+                x0 = 16 + i * (ri.shape[1] + 8)
+                if x0 + ri.shape[1] <= w and 70 + ri.shape[0] <= h:
+                    fr[70:70 + ri.shape[0], x0:x0 + ri.shape[1]] = ri
             if anchor is not None:  # cross-fade from/to the boundary frame over the first/last second
                 pos = f if ext["direction"] == "end" else dur * fps - 1 - f
                 alpha = max(0.0, 1.0 - pos / fps)

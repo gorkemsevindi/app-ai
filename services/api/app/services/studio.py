@@ -65,6 +65,7 @@ DEFAULTS: dict = {
     "max_job_cost_usd": 5.0,
     "max_project_cost_usd": 30.0,
 }
+LOCK_RANK = ["standard", "strong", "strict"]
 RESOLUTIONS = {"9:16": "720x1280", "16:9": "1280x720", "1:1": "720x720"}
 KEY_RE = r"^[a-z0-9_-]{1,40}$"
 
@@ -127,6 +128,7 @@ class CharacterRef(BaseModel):
     name: str = Field(min_length=1, max_length=60)
     description: str = Field(default="", max_length=500)
     character_id: uuid.UUID | None = None
+    cast_member_id: uuid.UUID | None = None  # V6: frozen cast snapshot (persistent character identity)
 
 
 class AudioCfg(BaseModel):
@@ -170,6 +172,7 @@ class Brief(BaseModel):
     quality: Literal["standard", "premium"] = "standard"
     style: str = Field(default="", max_length=300)
     character_ids: list[uuid.UUID] = Field(default_factory=list, max_length=8)
+    cast_member_ids: list[uuid.UUID] = Field(default_factory=list, max_length=8)  # V6 cast (also via @mentions)
     music_asset_id: uuid.UUID | None = None
     platform: str | None = Field(default=None, max_length=30)
     creative_mode: Literal["faithful", "balanced", "experimental"] = "balanced"
@@ -334,6 +337,27 @@ def validate_storyboard(db: Session, user: User, raw: dict, cfg: dict) -> Storyb
     texts_all = [sb.title, sb.style] + [t for s in shots for t in [s.prompt, s.camera, s.caption] +
                                         [d.text for d in s.dialogue]]
     for c in sb.characters:
+        if c.cast_member_id is not None:
+            from ..models import Character, ProjectCastMember
+            from . import character_market
+
+            m = db.get(ProjectCastMember, c.cast_member_id)
+            p = db.get(StudioProject, m.project_id) if m is not None else None
+            if c.character_id is not None or m is None or m.removed_at is not None or p is None or \
+                    p.user_id != user.id:
+                raise ApiError(422, "bad_storyboard", f"character {c.key}: unknown cast member")
+            if m.grant_id is not None:  # licensed character: the grant's prohibited contexts apply
+                from ..models import CharacterLicenseGrant
+
+                g = db.get(CharacterLicenseGrant, m.grant_id)
+                bad = character_market.check_contexts(g.terms_snapshot, texts_all) if g else ["license_missing"]
+                if bad:
+                    raise ApiError(422, "license_terms_violation",
+                                   "this storyboard uses the licensed character in a prohibited context",
+                                   {"contexts": bad, "character": c.key})
+            ch = db.get(Character, m.character_id)
+            if ch is not None and ch.creator_id != user.id and m.grant_id is None:
+                raise ApiError(422, "bad_storyboard", f"character {c.key}: not licensed")
         if c.character_id is not None:
             ch = get_character(db, user, c.character_id)
             if ch.actor_license_id is not None:  # licensed actor: the licence's prohibited contexts apply
@@ -374,6 +398,31 @@ def add_version(db: Session, user: User, project: StudioProject, sb: Storyboard,
 
 # ---------------------------------------------------------------- director
 
+class CastChar:
+    """A project cast member presented to the directors like a character (V6)."""
+
+    def __init__(self, member_id: uuid.UUID, name: str, description: str, alias: str):
+        self.cast_member_id, self.name, self.description, self.alias = member_id, name, description, alias
+
+
+def _char_dicts(characters: list) -> list[dict]:
+    out = []
+    for i, c in enumerate(characters):
+        if isinstance(c, CastChar):
+            out.append({"key": c.alias, "name": c.name, "description": c.description,
+                        "cast_member_id": str(c.cast_member_id)})
+        else:
+            out.append({"key": f"c{i + 1}", "name": c.name, "description": c.description, "character_id": str(c.id)})
+    return out
+
+
+def _shot_chars(chars: list[dict], text: str) -> list[str]:
+    """@alias mentions in a sentence pick that shot's cast; otherwise everyone (legacy behaviour)."""
+    low = text.lower()
+    named = [c["key"] for c in chars if c.get("cast_member_id") and f"@{c['key']}" in low]
+    return (named or [c["key"] for c in chars])[:4]
+
+
 class RuleBasedDirector:
     """Deterministic planner (no AI): one shot per sentence of the brief. Clearly labelled to the user."""
 
@@ -389,15 +438,14 @@ class RuleBasedDirector:
         target = min(brief.target_duration_s, int(cfg["max_total_s"]))
         n = max(1, min(len(sentences) or 1, int(cfg["max_shots"]), max(1, target // allowed[0])))
         per = min(allowed, key=lambda d: abs(d - target / n))
-        chars = [{"key": f"c{i + 1}", "name": c.name, "description": c.description, "character_id": str(c.id)}
-                 for i, c in enumerate(characters)]
+        chars = _char_dicts(characters)
         shots = []
         for i in range(n):
             text = sentences[i] if i < len(sentences) else brief.brief[:200]
             shots.append({"key": f"sh{i + 1}", "duration_s": per,
                           "prompt": f"{brief.style + '. ' if brief.style else ''}{text}"[:1500],
                           "camera": cams[(i + seed) % len(cams)] if i else cams[0],
-                          "characters": [c["key"] for c in chars][:4], "caption": text[:300],
+                          "characters": _shot_chars(chars, text), "caption": text[:300],
                           "transition": "cut" if i == 0 else "fade"})
         return {"title": brief.title or brief.brief[:60], "language": brief.language,
                 "aspect_ratio": brief.aspect_ratio, "style": brief.style, "quality": brief.quality,
@@ -432,8 +480,7 @@ class GeminiDirector:
     def plan(self, brief: Brief, characters: list[StudioCharacter], cfg: dict) -> dict:
         from google.genai import types
 
-        chars = [{"key": f"c{i + 1}", "name": c.name, "description": c.description, "character_id": str(c.id)}
-                 for i, c in enumerate(characters)]
+        chars = _char_dicts(characters)
         instructions = (
             "You are a film director planning a short video. Return ONLY JSON for the storyboard schema. "
             f"Use shot durations from {cfg['allowed_shot_durations']} seconds, at most {cfg['max_shots']} shots and "
@@ -483,11 +530,31 @@ def plan_storyboard(db: Session, user: User, project: StudioProject, brief: Brie
     cfg = require_enabled(db)
     _check_text(brief.brief)
     _check_text(brief.style)
-    chars = [get_character(db, user, cid) for cid in brief.character_ids]
+    chars = [get_character(db, user, cid) for cid in brief.character_ids] + plan_cast(db, user, project, brief)
     d = director(cfg)
     sb, meta = plan_candidates(db, user, project, brief, chars, d, cfg)
     return add_version(db, user, project, sb, "director", brief.model_dump(mode="json"),
                        {"provider": d.name, "label": d.label}, project.current_version_id, creative=meta)
+
+
+def plan_cast(db: Session, user: User, project: StudioProject, brief: Brief) -> list[CastChar]:
+    """V6.6: @mentions in the brief must all resolve to this project's cast (never silently); explicitly
+    listed cast members are added too."""
+    from . import casting, characters
+
+    ids: list[uuid.UUID] = list(brief.cast_member_ids)
+    if characters.find_mentions(brief.brief):
+        res = casting.resolve_script(db, user, project, brief.brief)
+        if not res["all_bound"]:
+            raise ApiError(409, "cast_resolution_required", "cast or disambiguate the mentioned characters first",
+                           {"mentions": [m for m in res["mentions"] if m["status"] != "bound"]})
+        ids += [uuid.UUID(m["cast_member_id"]) for m in res["mentions"]]
+    out = []
+    for mid in dict.fromkeys(ids):
+        m = casting.get_member(db, project, mid)
+        d = casting.display(db, m.id)
+        out.append(CastChar(m.id, d["name"], d["description"], d["alias"]))
+    return out
 
 
 def variations(db: Session, user: User, project: StudioProject, count: int, mode: str | None
@@ -501,7 +568,7 @@ def variations(db: Session, user: User, project: StudioProject, count: int, mode
     if not base.brief:
         raise ApiError(409, "variations_need_brief", "variations need a storyboard planned from a brief")
     brief = Brief.model_validate({**base.brief, **({"creative_mode": mode} if mode else {})})
-    chars = [get_character(db, user, cid) for cid in brief.character_ids]
+    chars = [get_character(db, user, cid) for cid in brief.character_ids] + plan_cast(db, user, project, brief)
     d = director(cfg)
     used = {base.creative.get("composition")} - {None}
     out = []
@@ -564,9 +631,14 @@ def _shot_inputs(db: Session, sb: Storyboard, shot: Shot, provider: str) -> dict
     for k in shot.characters:
         c = by_key[k]
         ch = db.get(StudioCharacter, c.character_id) if c.character_id else None
-        refs.append({"key": k, "name": c.name, "description": c.description,
-                     "character_id": str(ch.id) if ch else None,
-                     "identity_profile_id": str(ch.identity_profile_id) if ch and ch.identity_profile_id else None})
+        ref = {"key": k, "name": c.name, "description": c.description,
+               "character_id": str(ch.id) if ch else None,
+               "identity_profile_id": str(ch.identity_profile_id) if ch and ch.identity_profile_id else None}
+        if c.cast_member_id is not None:  # V6: the frozen identity snapshot changes pixels -> hashed
+            from . import casting
+
+            ref["cast"] = casting.cast_input(db, c.cast_member_id)
+        refs.append(ref)
     if shot.derive is not None and shot.derive.kind == "trim":
         # a trim's pixels are fully defined by its source render and the range
         return {"trim_of": shot.derive.from_hash, "start_s": shot.derive.start_s, "end_s": shot.derive.end_s,
@@ -593,7 +665,7 @@ def needed_capabilities(inputs: dict) -> set[str]:
     caps = {"TEXT_TO_VIDEO"}
     if inputs.get("extend"):
         caps.add("VIDEO_EXTEND" if inputs["extend"]["direction"] == "end" else "VIDEO_PREPEND")
-    if any(c["identity_profile_id"] for c in inputs["characters"]):
+    if any(c["identity_profile_id"] or c.get("cast") for c in inputs["characters"]):
         caps.add("CHARACTER_REFERENCE")
     return caps
 
@@ -646,9 +718,32 @@ def estimate_storyboard(db: Session, user: User, project: StudioProject, storybo
             ch = db.get(StudioCharacter, uuid.UUID(c["character_id"])) if c["character_id"] else None
             if ch is not None and not character_usable(db, ch):
                 blocked.append({"shot": shot.key, "character": c["key"], "reason": "consent_missing"})
+        cast = [c for c in inp["characters"] if c.get("cast")]
+        lock = max((c["cast"]["lock_mode"] for c in cast), key=LOCK_RANK.index, default=None)
+        license_rows: list[dict] = []
+        if cast and state != "derived":
+            from . import casting, characters
+
+            _, ccfg = characters.config(db)
+            if lock in ("strong", "strict"):  # more identity conditioning / QC: priced by remote config
+                credits_ = int(math.ceil(credits_ * float(ccfg["lock"]["strong_credit_multiplier"])))
+                usd = round(usd * float(ccfg["lock"]["strong_credit_multiplier"]), 4) if usd is not None else None
+            for c in cast:
+                problem = casting.cast_problem(db, user.id, project.id, uuid.UUID(c["cast"]["member_id"]))
+                if problem:
+                    blocked.append({"shot": shot.key, "character": c["key"], "reason": problem})
+                    continue
+                pr = casting.pricing(db, uuid.UUID(c["cast"]["member_id"]), shot.duration_s)
+                license_rows.append({"key": c["key"], "character_id": c["cast"]["character_uuid"],
+                                     "identity_version_id": c["cast"]["identity_version_id"],
+                                     "owner_id": pr["owner_id"], "grant_id": pr["grant_id"],
+                                     "license_credits": pr["license_credits"], "seconds": shot.duration_s})
+            credits_ += sum(x["license_credits"] for x in license_rows)
         rows.append({"key": shot.key, "duration_s": shot.duration_s, "hash": h, "status": state,
                      "credits": credits_ if state == "new" else 0, "full_credits": credits_,
-                     "est_cost_usd": usd if state == "new" else 0.0, "capabilities": sorted(needed_capabilities(inp))})
+                     "est_cost_usd": usd if state == "new" else 0.0, "capabilities": sorted(needed_capabilities(inp)),
+                     "lock_mode": lock, "license": license_rows,
+                     "license_credits": sum(x["license_credits"] for x in license_rows)})
         if state == "new":
             new_credits += credits_
             new_usd = new_usd + usd if (usd is not None and new_usd is not None) else None
@@ -657,6 +752,9 @@ def estimate_storyboard(db: Session, user: User, project: StudioProject, storybo
     limitations = list(sb.limitations)
     if sb.audio.voice == "tts":
         limitations.append("Speech synthesis is not enabled yet: dialogue is shown as captions.")
+    if any(r["lock_mode"] for r in rows):
+        limitations.append("Character identity is measured per shot, not guaranteed. Strict lock retries a failed "
+                           "shot within a fixed budget (failed attempts are refunded), then fails explicitly.")
     if missing:
         limitations.append(f"The current video provider does not support: {', '.join(sorted(missing))}.")
     if provider is None:
@@ -693,8 +791,10 @@ def render(db: Session, user: User, project: StudioProject, version_id: uuid.UUI
                 "jobs": [str(j.id) for j in replay], "status": project.status, "replay": True}
     est = estimate(db, user, project, v)
     if est["blocked"]:
-        raise ApiError(409, "consent_required", "a character's likeness consent is missing or revoked",
-                       {"blocked": est["blocked"]})
+        if all(b["reason"] == "consent_missing" for b in est["blocked"]):
+            raise ApiError(409, "consent_required", "a character's likeness consent is missing or revoked",
+                           {"blocked": est["blocked"]})
+        raise ApiError(409, "cast_unavailable", "a cast character can't be used right now", {"blocked": est["blocked"]})
     if est["missing_sources"]:
         raise ApiError(409, "source_not_rendered", "trimmed or extended shots need their source shot rendered first",
                        {"shots": est["missing_sources"]})
@@ -734,6 +834,16 @@ def render(db: Session, user: User, project: StudioProject, version_id: uuid.UUI
                 "project_version_id": str(v.id), "resolution": RESOLUTIONS[sb.aspect_ratio],
                 "creative_mode": sb.creative_mode or "manual", "prompt_strategy": sb.prompt_strategy or "v0",
                 "seed": sb.seed, "routing": est.get("routing_policy")}
+        if row["lock_mode"]:  # V6.5: identity gate per cast member; strict = bounded retry budget
+            from . import characters
+
+            _, ccfg = characters.config(db)
+            spec["identity_gate"] = {"lock_mode": row["lock_mode"], "attempt": 0,
+                                     "budget": int(ccfg["lock"]["strict_retry_budget"]) if row["lock_mode"] == "strict"
+                                     else 0,
+                                     "members": {c["key"]: c["cast"]["lock_mode"] for c in inp["characters"]
+                                                 if c.get("cast")}}
+            spec["character_usage"] = row["license"]
         if shot.derive is not None:  # extension: the worker needs the source render's boundary frames
             src = db.execute(select(StudioShotRender).where(StudioShotRender.project_id == project.id,
                                                             StudioShotRender.content_hash == shot.derive.from_hash)
@@ -754,6 +864,10 @@ def render(db: Session, user: User, project: StudioProject, version_id: uuid.UUI
             db.add(r)
         r.status, r.job_id, r.video_key = "queued", job.id, None
         credits.reserve(db, job)  # 402 rolls back the whole render: all or nothing
+        if spec.get("character_usage"):
+            from . import character_market
+
+            character_market.reserve_usage(db, job, spec["character_usage"])
         created.append(job)
     project.rendered_version_id = v.id
     project.status = "rendering"
@@ -818,6 +932,17 @@ def maybe_assemble(db: Session, project: StudioProject) -> GenerationJob | None:
             lic = db.get(ActorLicense, ch.actor_license_id)
             if lic is not None and lic.terms_snapshot.get("attribution_required"):
                 credits_line.append(db.get(ActorListing, lic.listing_id).display_name)
+    for c in sb.characters:
+        if c.cast_member_id is None:
+            continue
+        from ..models import Character, CharacterLicenseGrant, ProjectCastMember
+
+        m = db.get(ProjectCastMember, c.cast_member_id)
+        g = db.get(CharacterLicenseGrant, m.grant_id) if m is not None and m.grant_id else None
+        if g is not None and g.terms_snapshot.get("attribution_required"):
+            from . import characters as _chars
+
+            credits_line.append(_chars.public_handle(db, db.get(Character, m.character_id)))
     final_captions = captions if sb.captions.enabled else []
     if credits_line and t >= 2000:  # licence terms: credit the licensed AI actor (even with captions off)
         final_captions = final_captions + [{"start_ms": t - 2000, "end_ms": t,
@@ -851,6 +976,98 @@ def on_job_completed(db: Session, job: GenerationJob, video_key: str, duration_m
         maybe_assemble(db, project)
     elif job.kind == JobKind.studio_assemble and job.spec.get("project_version_id") == str(project.rendered_version_id):
         project.status, project.output_job_id = "ready", job.id
+
+
+def identity_gate(db: Session, job: GenerationJob, metrics: dict) -> str | None:
+    """V6.5: record a measured identity report per cast member of a finished shot; strict lock fails the shot when
+    a member is below threshold or could not be measured. Proxy passes are 'measured', never 'verified'."""
+    from ..models import CharacterQualityReport
+    from . import characters
+
+    gate = job.spec.get("identity_gate")
+    if not gate:
+        return None
+    _, ccfg = characters.config(db)
+    th = ccfg["qc"]
+    ident = ((metrics or {}).get("qa") or {}).get("identity") or {}
+    failed = []
+    for c in job.spec["inputs"]["characters"]:
+        if not c.get("cast"):
+            continue
+        m = ident.get(c["key"]) if isinstance(ident.get(c["key"]), dict) else {}
+        method, score = str(m.get("method") or "none"), m.get("score")
+        thr = th["face_similarity_min"] if method == "face_embedding" else th["proxy_similarity_min"]
+        if method == "none" or not isinstance(score, (int, float)):
+            verdict = "insufficient"
+        else:
+            verdict = "pass" if score >= thr else "fail"
+        db.add(CharacterQualityReport(
+            character_id=uuid.UUID(c["cast"]["character_uuid"]),
+            identity_version_id=uuid.UUID(c["cast"]["identity_version_id"]), scope="shot", job_id=job.id,
+            method=method, verdict=verdict, thresholds={"min": thr},
+            metrics={"shot_key": job.spec["shot"]["key"], "score": score, "lock_mode": c["cast"]["lock_mode"],
+                     "attempt": gate.get("attempt", 0),
+                     **{k: v for k, v in m.items() if k in ("frames", "detected_ratio", "min", "max")}}))
+        if c["cast"]["lock_mode"] == "strict" and verdict != "pass":
+            failed.append(c["key"])
+    db.flush()
+    return "identity_check_failed" if failed else None
+
+
+def on_identity_failed(db: Session, job: GenerationJob) -> GenerationJob | None:
+    """Strict lock: retry within the budget (a new reserved job; the failed attempt was refunded), otherwise the
+    shot fails explicitly."""
+    gate = dict(job.spec.get("identity_gate") or {})
+    project = db.get(StudioProject, job.studio_project_id)
+    r = db.execute(select(StudioShotRender).where(StudioShotRender.project_id == job.studio_project_id,
+                                                  StudioShotRender.content_hash == job.spec["content_hash"])
+                   ).scalar_one_or_none()
+    if gate.get("attempt", 0) < gate.get("budget", 0):
+        gate["attempt"] = gate.get("attempt", 0) + 1
+        spec = {**job.spec, "identity_gate": gate}
+        retry = GenerationJob(
+            id=uuid.uuid4(), user_id=job.user_id, kind=JobKind.studio_shot, status=JobStatus.queued,
+            queue_class=job.queue_class, studio_project_id=job.studio_project_id,
+            preferred_model=job.preferred_model, fallback_model=job.fallback_model,
+            idempotency_key=f"{job.idempotency_key[:70]}:r{gate['attempt']}", credit_cost=job.credit_cost,
+            max_attempts=job.max_attempts, watermark=False, est_cost_usd=job.est_cost_usd, spec=spec)
+        try:
+            with db.begin_nested():
+                db.add(retry)
+                db.flush()
+                credits.reserve(db, retry)
+                if spec.get("character_usage"):
+                    from . import character_market
+
+                    character_market.reserve_usage(db, retry, spec["character_usage"])
+        except ApiError:
+            retry = None  # cannot pay for the retry: explicit failure below
+        if retry is not None:
+            if r is not None and r.job_id == job.id:
+                r.status, r.job_id = "queued", retry.id
+            return retry
+    if r is not None and r.job_id == job.id:
+        r.status = "identity_failed"
+    if project is not None:
+        project.status = "failed"
+    return None
+
+
+def shot_identity(db: Session, project: StudioProject) -> list[dict]:
+    from ..models import CharacterQualityReport
+
+    jobs = {j.id: j for j in db.execute(select(GenerationJob).where(
+        GenerationJob.studio_project_id == project.id, GenerationJob.kind == JobKind.studio_shot)).scalars()}
+    if not jobs:
+        return []
+    rows = db.execute(select(CharacterQualityReport).where(CharacterQualityReport.job_id.in_(list(jobs)))
+                      .order_by(CharacterQualityReport.created_at)).scalars().all()
+    return [{"job_id": str(r.job_id), "shot_key": r.metrics.get("shot_key"), "character_id": str(r.character_id),
+             "identity_version_id": str(r.identity_version_id), "method": r.method, "verdict": r.verdict,
+             "score": r.metrics.get("score"), "threshold": r.thresholds.get("min"),
+             "lock_mode": r.metrics.get("lock_mode"), "attempt": r.metrics.get("attempt"),
+             "label": "measured (proxy)" if r.method == "proxy" and r.verdict == "pass" else
+             ("measured" if r.verdict == "pass" else r.verdict)} for r in rows]
 
 
 def on_job_failed(db: Session, job: GenerationJob) -> None:
@@ -889,6 +1106,20 @@ def build_payload(db: Session, job: GenerationJob) -> dict:
     if job.kind == JobKind.studio_shot:
         refs = {}
         for c in job.spec["inputs"]["characters"]:
+            if c.get("cast"):  # V6: re-check licence/consent/suspension at dispatch; send identity references
+                from ..models import CharacterIdentityVersion
+                from . import casting, characters
+
+                problem = casting.cast_problem(db, job.user_id, job.studio_project_id,
+                                               uuid.UUID(c["cast"]["member_id"]))
+                if problem:
+                    raise DispatchRefused(problem)
+                _, ccfg = characters.config(db)
+                v = db.get(CharacterIdentityVersion, uuid.UUID(c["cast"]["identity_version_id"]))
+                # rendering access is not asset access: only the worker gets short-lived URLs
+                refs[c["key"]] = [st.presign_get(k, 3600) for k in
+                                  characters.reference_keys(v, int(ccfg["lock"]["max_reference_images"]))]
+                continue
             if not c.get("character_id"):
                 continue
             ch = db.get(StudioCharacter, uuid.UUID(c["character_id"]))

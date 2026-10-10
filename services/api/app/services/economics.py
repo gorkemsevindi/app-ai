@@ -31,6 +31,10 @@ def config(db: Session) -> dict:
 def feature_of(job: GenerationJob) -> str:
     if job.kind == JobKind.analysis:
         return "analysis"
+    if job.kind in (JobKind.studio_shot, JobKind.studio_assemble):
+        return "studio"
+    if job.kind == JobKind.character_asset:
+        return "character"
     base = "template" if job.kind == JobKind.template else ("remix" if job.template_id else "multi_person")
     lip = ((job.spec or {}).get("audio") or {}).get("lip_sync", {}).get("enabled")
     return f"{base}+lip_sync" if lip else base

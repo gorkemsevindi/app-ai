@@ -180,7 +180,19 @@
     "terms_required": "Accept the creator terms.",
     "license_invalid": "This actor licence can't be used.",
     "license_terms_violation": "This use breaks the licensed actor's terms.",
-    "territory_not_licensed": "This actor isn't licensed in your country."
+    "territory_not_licensed": "This actor isn't licensed in your country.",
+    "minor_not_allowed": "Characters must be adults.",
+    "impersonation_not_allowed": "Describe an original character, not a real or famous person.",
+    "rights_conflict": "This names a protected person or work.",
+    "rights_declaration_required": "Please confirm the rights declaration.",
+    "license_required": "This character needs a licence first.",
+    "cast_resolution_required": "Cast or pick the mentioned characters first.",
+    "identity_not_locked": "Lock the character identity first.",
+    "creator_review_required": "Approve every view before locking.",
+    "identity_validation_failed": "Fix failed or missing views before locking.",
+    "voice_cloning_disabled": "Voice cloning is not available.",
+    "cast_unavailable": "A cast character can't be used right now.",
+    "immutable_trait_change": "These traits define the identity: create a major version."
   },
   "remix": {
     "slots": "Who stars in it?",
@@ -286,5 +298,93 @@
     "note": "Your videos and prompts are never shared with other users. Technical improvement only uses timing, success and quality numbers.",
     "delete": "Delete my learning data",
     "deleted": "Your learning data was deleted."
+  },
+  "character": {
+    "title": "Characters",
+    "comingSoon": "Character creation is coming soon.",
+    "create": "Create an original digital actor",
+    "name": "Display name",
+    "handle": "Handle (e.g. mert)",
+    "description": "Description",
+    "descriptionHint": "Describe an original, adult, fictional character: face, hair, style, personality, voice.",
+    "aesthetic": {
+      "photorealistic": "Photorealistic",
+      "stylized": "Stylized",
+      "animation": "Animation"
+    },
+    "age": {
+      "young_adult": "Young adult",
+      "adult": "Adult",
+      "middle_aged": "Middle-aged",
+      "senior": "Senior"
+    },
+    "rights": "This character is my original creation, an adult, not based on a real person and free of third-party IP. I accept the character terms.",
+    "createCta": "Create character",
+    "lockedBadge": "identity locked",
+    "status": {
+      "draft": "Draft",
+      "private": "Private",
+      "unlisted": "Unlisted",
+      "public": "Public",
+      "suspended": "Suspended",
+      "deleted": "Deleted"
+    },
+    "version": {
+      "draft": "choose a master identity",
+      "master_approved": "master approved",
+      "built": "review the identity sheet",
+      "locked": "locked",
+      "superseded": "superseded"
+    },
+    "asset": {
+      "pending": "generating",
+      "ready": "ready",
+      "approved": "approved",
+      "rejected": "rejected",
+      "failed": "failed"
+    },
+    "lockedAs": "Locked identity: v{{v}}. Cast it in AI Studio with @handle.",
+    "previewsHint": "Generate seed previews and pick the master identity. Reroll as often as you like before approving.",
+    "previews": "Generate previews",
+    "reroll": "Reroll previews",
+    "approveMaster": "Use this as the master identity?",
+    "build": "Build multi-angle identity sheet",
+    "sheet": "Identity sheet (approve or reject each view)",
+    "notFaceView": "face match not meaningful here",
+    "confirm": "{{credits}} credits for {{n}} images",
+    "report": "Validation: {{verdict}} ({{method}})",
+    "verified": "Face-embedding check passed and every view approved.",
+    "measuredOnly": "Measured, not guaranteed: proxy metrics only or views not yet approved.",
+    "failedViews": "Needs repair: {{v}}",
+    "repair": "Regenerate rejected / failed views",
+    "lock": "Lock identity",
+    "verdict": {
+      "pass": "pass",
+      "warn": "needs review",
+      "fail": "failed",
+      "insufficient": "not measurable"
+    }
+  },
+  "cast": {
+    "title": "Cast",
+    "mention": "Character mention",
+    "add": "Add to cast",
+    "licensed": "licensed",
+    "lock": {
+      "standard": "Standard",
+      "strong": "Strong",
+      "strict": "Strict"
+    },
+    "lockHint": {
+      "standard": "Best effort: identity is measured and reported.",
+      "strong": "More identity conditioning and checks (higher price).",
+      "strict": "Shots below the identity threshold are retried a few times (failed attempts refunded), then fail clearly."
+    },
+    "resolution": {
+      "ambiguous": "Several characters match: pick one.",
+      "not_found": "No character found.",
+      "needs_cast": "Add this character to the cast.",
+      "bound": "Already in the cast."
+    }
   }
 }

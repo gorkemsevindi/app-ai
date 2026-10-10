@@ -64,6 +64,7 @@ class PolicyConfig(BaseModel):
     creator_share_rate: float = Field(ge=0, le=1)
     referral_rate: float = Field(default=0.0, ge=0, le=1)
     actor_share_rate: float = Field(default=0.0, ge=0, le=1)
+    character_share_rate: float = Field(default=0.0, ge=0, le=1)  # V6: share of character licence revenue
     referral_stacking: bool = False
     precedence: str = Field(default="template_first", pattern=r"^(template_first|referral_first)$")
     usd_per_paid_credit: float = Field(gt=0, description="net revenue per paid credit after store fees/taxes")
@@ -193,11 +194,18 @@ def on_job_settled(db: Session, job: GenerationJob) -> list[CreatorEarning]:
         else:
             pay_template = False
     refs = {"job_id": job.id, "template_id": job.template_id, "payer_id": payer}
+    # V6 waterfall: contractual character royalties are paid first; shares never exceed collected net revenue
+    taken = int(db.execute(select(func.coalesce(func.sum(CreatorEarning.amount_micros), 0)).where(
+        CreatorEarning.job_id == job.id, CreatorEarning.kind == "character_royalty")).scalar_one())
+    room = max(0, gross - taken)
     if pay_template:
-        out.append(_accrue(db, creator, "template_share", round(gross * cfg.creator_share_rate), gross, policy,
+        amt = min(round(gross * cfg.creator_share_rate), room)
+        room -= amt
+        out.append(_accrue(db, creator, "template_share", amt, gross, policy,
                            f"tshare:{job.id}", cfg, **refs))
     if pay_referral:
-        out.append(_accrue(db, referrer, "referral_commission", round(gross * cfg.referral_rate), gross, policy,
+        out.append(_accrue(db, referrer, "referral_commission", min(round(gross * cfg.referral_rate), room), gross,
+                           policy,
                            f"ref:{job.id}", cfg, attribution_id=attr.id, **refs))
     return [e for e in out if e is not None]
 
@@ -217,7 +225,8 @@ def _claw(db: Session, orig: CreatorEarning, fraction: float, key: str, note: st
 
 def _accruals_for_job(db: Session, job_id: uuid.UUID) -> list[CreatorEarning]:
     return list(db.execute(select(CreatorEarning).where(
-        CreatorEarning.job_id == job_id, CreatorEarning.kind.in_(("template_share", "referral_commission")))
+        CreatorEarning.job_id == job_id,
+        CreatorEarning.kind.in_(("template_share", "referral_commission", "character_royalty")))
     ).scalars())
 
 
@@ -287,6 +296,10 @@ def risk_signals(db: Session, creator_id: uuid.UUID, rules: RiskRules) -> dict:
     conc = max(by_payer.values()) / gross if gross else 0.0
     reports = db.execute(select(func.count()).select_from(Report).join(Template, Template.id == Report.template_id)
                          .where(Template.creator_id == creator_id, Report.status == "open")).scalar_one()
+    from ..models import Character
+
+    reports += db.execute(select(func.count()).select_from(Report).join(Character, Character.id == Report.character_id)
+                          .where(Character.creator_id == creator_id, Report.status == "open")).scalar_one()
     open_hold = db.execute(select(CreatorRiskHold.id).where(CreatorRiskHold.creator_id == creator_id,
                                                             CreatorRiskHold.status == "open")).first()
     reasons = []

@@ -77,6 +77,9 @@ def process(api: ApiClient, adapters: dict, payload: dict, workdir: Path) -> Non
         if payload.get("kind") in ("studio_shot", "studio_assemble"):
             _process_studio(api, adapter, payload, workdir, hb, metrics, t0)
             return
+        if payload.get("kind") == "character_asset":
+            _process_character(api, adapter, payload, workdir, hb, metrics, t0)
+            return
         refs = []
         for i, a in enumerate(payload["identity_assets"]):
             if a["kind"] == "photo":
@@ -193,6 +196,10 @@ def _process_studio(api: ApiClient, adapter, payload: dict, workdir: Path, hb: H
             from .studio.shots import seam_score
 
             info["qa"] = {"seam_score": seam_score(boundary, raw, spec["extend"]["direction"])}
+        if spec.get("identity_gate") and refs:  # V6.5: measure each cast member's identity in the shot
+            from .characters.qc import shot_identity
+
+            info.setdefault("qa", {})["identity"] = shot_identity(raw, refs)
         hb.update(0.9, "postprocessing")
         # shots are intermediates: no watermark here, it is applied once on the assembled film
         enc = encode_vertical(raw, workdir, width=w, height=h, watermark=False, job_id=job_id, audio=raw)
@@ -216,6 +223,40 @@ def _process_studio(api: ApiClient, adapter, payload: dict, workdir: Path, hb: H
     hb.stop()
     api.complete(job_id, attempt, {"width": enc.width, "height": enc.height, "duration_ms": enc.duration_ms,
                                    "codec": "h264"}, report, metrics)
+
+
+def _process_character(api: ApiClient, adapter, payload: dict, workdir: Path, hb: Heartbeat, metrics: dict,
+                       t0: float) -> None:
+    """One character identity image: generate, measure against the master (views), moderate, upload."""
+    import hashlib
+
+    from .characters.qc import compare_view, dhash
+
+    job_id, attempt, spec = payload["job_id"], payload["attempt"], payload["spec"]
+    refs = [download(u, workdir / f"ref_{i}.img") for i, u in enumerate(payload.get("reference_images") or [])]
+    hb.update(0.05, "generating")
+    img_path, info = adapter.generate(spec, refs, workdir, hb.update, hb.cancel)
+    if hb.lost.is_set():
+        return
+    hb.update(0.9, "postprocessing")
+    import cv2
+
+    img = cv2.imread(str(img_path))
+    qc = {"dhash": dhash(img)}
+    if spec["asset_kind"] == "view" and refs:
+        qc.update(compare_view(img_path, refs[0], bool(spec.get("face_meaningful"))))
+    report = moderation_report(img_path)
+    upload(payload["upload"]["image"]["url"], img_path, "image/png")
+    elapsed = time.time() - t0
+    metrics.update(gpu_seconds=elapsed, est_cost_usd=0.0 if info.get("mock") else None, qa={
+        k: v for k, v in qc.items() if isinstance(v, (int, float)) and not isinstance(v, bool)})
+    if metrics["est_cost_usd"] is None:
+        metrics.pop("est_cost_usd")  # priced per image by the API config, not by GPU time
+    hb.stop()
+    api.complete(job_id, attempt, {"sha256": hashlib.sha256(img_path.read_bytes()).hexdigest(),
+                                   "width": int(img.shape[1]), "height": int(img.shape[0]),
+                                   "model": info.get("model"), "mock": bool(info.get("mock")), "qc": qc},
+                 report, metrics)
 
 
 def _safe_fail(api, job_id, attempt, code, msg, retryable, metrics) -> None:

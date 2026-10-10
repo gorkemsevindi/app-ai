@@ -21,6 +21,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -256,6 +257,7 @@ class JobKind(str, enum.Enum):
     multi_replace = "multi_replace"  # multi-person: replace assigned people in an uploaded video
     studio_shot = "studio_shot"      # AI Studio: render one storyboard shot
     studio_assemble = "studio_assemble"  # AI Studio: assemble rendered shots + captions + audio
+    character_asset = "character_asset"  # V6: one character identity image (preview / master / view)
 
 
 class GenerationJob(TimestampMixin, Base):
@@ -1043,6 +1045,7 @@ class Report(TimestampMixin, Base):
     job_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("generation_jobs.id", ondelete="SET NULL"),
                                                      index=True)
     template_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("templates.id", ondelete="SET NULL"))
+    character_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), index=True)  # V6
     reason: Mapped[str] = mapped_column(String(40))
     details: Mapped[str | None] = mapped_column(String(1000))
     status: Mapped[str] = mapped_column(String(20), default="open", index=True)  # open|actioned|dismissed
@@ -1118,3 +1121,206 @@ class WebhookEvent(Base):
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (UniqueConstraint("provider", "event_id", name="uq_webhook_provider_event"),)
+
+
+# ---------------------------------------------------------------- V6 creator character identity ecosystem
+
+class Character(TimestampMixin, Base):
+    """A persistent digital actor. `id` is the immutable character UUID; the public handle is
+    `@<creator handle>/<handle>` and is unique per creator only (display names need not be unique)."""
+
+    __tablename__ = "characters"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    creator_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
+    handle: Mapped[str] = mapped_column(String(32))
+    display_name: Mapped[str] = mapped_column(String(60))
+    status: Mapped[str] = mapped_column(String(16), default="draft")  # draft|private|unlisted|public|suspended|deleted
+    origin: Mapped[str] = mapped_column(String(16), default="synthetic")  # synthetic|real_person
+    identity_profile_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))  # real_person: own profile
+    current_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    locked_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    moderation_status: Mapped[str] = mapped_column(String(16), default="none")  # none|flagged|cleared|removed
+    moderation_note: Mapped[str | None] = mapped_column(String(300))
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (UniqueConstraint("creator_id", "handle", name="uq_character_creator_handle"),)
+
+
+class CharacterIdentityVersion(Base):
+    """Immutable core identity per version. Changing immutable traits = new major version; cosmetic variants
+    (wardrobe, lighting presets) = minor versions. A locked version never changes."""
+
+    __tablename__ = "character_identity_versions"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    character_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("characters.id", ondelete="CASCADE"), index=True)
+    major: Mapped[int] = mapped_column(Integer)
+    minor: Mapped[int] = mapped_column(Integer, default=0)
+    parent_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    change_kind: Mapped[str] = mapped_column(String(10), default="initial")  # initial|major|minor
+    original_prompt: Mapped[str] = mapped_column(Text)  # the creator's words, never overwritten
+    spec: Mapped[dict[str, Any]] = mapped_column(JSONB)  # CharacterSpec (schema cs1)
+    status: Mapped[str] = mapped_column(String(16), default="draft")
+    # draft|master_approved|built|locked|superseded
+    master_asset_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    package: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)  # IdentityPackageManifest
+    package_checksum: Mapped[str | None] = mapped_column(String(64))
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (UniqueConstraint("character_id", "major", "minor", name="uq_character_version"),)
+
+
+class CharacterAsset(Base):
+    """One identity image with full provenance. Private storage only; licensees never get these URLs."""
+
+    __tablename__ = "character_assets"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    character_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("characters.id", ondelete="CASCADE"), index=True)
+    identity_version_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("character_identity_versions.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(20))  # seed_preview|master_portrait|master_fullbody|view
+    view_key: Mapped[str] = mapped_column(String(40))
+    status: Mapped[str] = mapped_column(String(16), default="pending")  # pending|ready|failed|rejected|approved
+    storage_key: Mapped[str | None] = mapped_column(String(512))
+    sha256: Mapped[str | None] = mapped_column(String(64))
+    width: Mapped[int | None] = mapped_column(Integer)
+    height: Mapped[int | None] = mapped_column(Integer)
+    provider: Mapped[str | None] = mapped_column(String(60))
+    model: Mapped[str | None] = mapped_column(String(120))
+    seed: Mapped[int | None] = mapped_column(BigInteger)
+    params: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    reference_asset_ids: Mapped[list[Any]] = mapped_column(JSONB, default=list)
+    job_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), index=True)
+    qc: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    creator_review: Mapped[str | None] = mapped_column(String(12))  # approved|rejected
+    superseded_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CharacterQualityReport(Base):
+    """IdentityValidationReport: measured, never a guarantee. `method` says whether a face embedder or only
+    proxy metrics were available; proxy-only results can never be 'verified'."""
+
+    __tablename__ = "character_quality_reports"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    character_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("characters.id", ondelete="CASCADE"), index=True)
+    identity_version_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    scope: Mapped[str] = mapped_column(String(10))  # build|shot
+    job_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), index=True)
+    method: Mapped[str] = mapped_column(String(20))  # face_embedding|proxy|none
+    metrics: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    thresholds: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    verdict: Mapped[str] = mapped_column(String(16))  # pass|warn|fail|insufficient
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CharacterRightsClaim(Base):
+    """Append-only originality / rights declaration (V6.1). Real-person references need a consent receipt."""
+
+    __tablename__ = "character_rights_claims"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    character_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("characters.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    origin: Mapped[str] = mapped_column(String(16))
+    declaration: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    terms_version: Mapped[str] = mapped_column(String(32))
+    consent_receipt_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CharacterVoiceProfile(Base):
+    """Versioned voice choice. Only licensed synthetic TTS voices are usable; consented voice likeness is
+    modelled but stays disabled (no cloning provider, separate abuse workflow required)."""
+
+    __tablename__ = "character_voice_profiles"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    character_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("characters.id", ondelete="CASCADE"), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    kind: Mapped[str] = mapped_column(String(20))  # licensed_tts|consented_likeness
+    provider: Mapped[str] = mapped_column(String(60))
+    voice_id: Mapped[str] = mapped_column(String(120))
+    languages: Mapped[list[Any]] = mapped_column(JSONB, default=list)
+    territories: Mapped[list[Any]] = mapped_column(JSONB, default=list)
+    allowed_use: Mapped[list[Any]] = mapped_column(JSONB, default=list)
+    style: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)  # accent, timbre, pace, pronunciation
+    status: Mapped[str] = mapped_column(String(12), default="active")  # active|revoked
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (UniqueConstraint("character_id", "version", name="uq_character_voice_version"),)
+
+
+class ProjectCastMember(Base):
+    """CastBinding: project + character + frozen identity/voice version. Creator updates never change it."""
+
+    __tablename__ = "project_cast_members"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    project_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("studio_projects.id", ondelete="CASCADE"), index=True)
+    character_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("characters.id", ondelete="RESTRICT"), index=True)
+    identity_version_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    voice_profile_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    alias: Mapped[str] = mapped_column(String(40))  # key used in the storyboard and in @alias mentions
+    lock_mode: Mapped[str] = mapped_column(String(10), default="standard")  # standard|strong|strict
+    allowed_variants: Mapped[list[Any]] = mapped_column(JSONB, default=list)
+    grant_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))  # licence grant (others' characters)
+    added_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    removed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (Index("uq_cast_alias_active", "project_id", "alias", unique=True,
+                            postgresql_where=text("removed_at IS NULL")),)
+
+
+class CharacterListing(TimestampMixin, Base):
+    """Marketplace listing with explicit, versioned licence terms and per-usage price."""
+
+    __tablename__ = "character_listings"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    character_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("characters.id", ondelete="CASCADE"), unique=True)
+    owner_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    identity_version_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    visibility: Mapped[str] = mapped_column(String(10))  # public|unlisted
+    status: Mapped[str] = mapped_column(String(16), default="pending_review")
+    # pending_review|active|paused|rejected|removed
+    terms: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    terms_version: Mapped[int] = mapped_column(Integer, default=1)
+    certification: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    review_note: Mapped[str | None] = mapped_column(String(300))
+
+
+class CharacterLicenseGrant(Base):
+    __tablename__ = "character_license_grants"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    listing_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("character_listings.id", ondelete="RESTRICT"),
+                                                  index=True)
+    character_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    licensee_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    terms_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    terms_version: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(12), default="active")  # active|revoked|expired
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoke_reason: Mapped[str | None] = mapped_column(String(300))
+    idempotency_key: Mapped[str] = mapped_column(String(160), unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CharacterUsageEvent(Base):
+    """CharacterUsageEvent: one per (job, character). Created with the reservation, settled exactly once
+    with the job (royalty accrues then), released when the job is refunded."""
+
+    __tablename__ = "character_usage_events"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    job_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    character_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    owner_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    grant_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), index=True)
+    identity_version_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    seconds: Mapped[int] = mapped_column(Integer)
+    license_credits: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(10), default="reserved")  # reserved|settled|released
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (UniqueConstraint("job_id", "character_id", name="uq_character_usage_job"),)

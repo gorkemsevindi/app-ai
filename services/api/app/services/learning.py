@@ -89,6 +89,8 @@ def delete_learning_data(db: Session, user: User, source: str = "data_deletion")
 def _intent(db: Session, job: GenerationJob) -> str:
     if job.kind == JobKind.studio_shot or job.kind == JobKind.studio_assemble:
         return "studio"
+    if job.kind == JobKind.character_asset:
+        return "character_identity"
     if job.template_id:
         t = db.get(Template, job.template_id)
         return t.category if t else "template"
@@ -135,7 +137,10 @@ def record_outcome(db: Session, job: GenerationJob) -> LearningEvent | None:
         actual_cost_usd=round(sum(r.est_cost_usd or 0.0 for r in runs), 5),
         quality=_numeric_qa((runs[-1].metrics or {}).get("qa") if runs else None),
         consent={k: c[k] for k in ("technical_improvement", "content_training")}, purpose="technical_improvement",
-        provenance={"source": "api.job_terminal", "schema": SCHEMA_VERSION, "routing": spec.get("routing")},
+        provenance={"source": "api.job_terminal", "schema": SCHEMA_VERSION, "routing": spec.get("routing"),
+                    # V6.12: technical character-consistency outcome only (no identity content)
+                    "character_lock": {k: (spec.get("identity_gate") or {}).get(k) for k in ("lock_mode", "attempt")}
+                    if spec.get("identity_gate") else None},
         retention_until=_now() + timedelta(days=int(cfg["retention_days"])))
     db.add(ev)
     return ev

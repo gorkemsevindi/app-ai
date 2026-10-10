@@ -238,7 +238,27 @@ learning_events, prompt_strategies, model_performance_aggregates, creative_prefe
   - Politika ve model kaydı için yönetim arayüzü yok; yalnızca API var.
   - Otomatik kalite ölçümleri (kimlik kayması, titreme) yok.
   - Model eğitimi için içerik saklama kapalı ve hukuk incelemesi gerekiyor. [HUKUK]
-- **Sırada:** V6 spesifikasyonu bekleniyor.
+- **Sırada:** V6 (aşağıda §5.4).
+
+### 5.4 V6 — Karakter Kimlik Ekosistemi (ayrıntı: `docs/V6_PHASE_REPORTS.md`)
+- ✅ **Aşama A:** denetim, eksik analizi ve plan (`docs/V6_AUDIT_AND_PLAN.md`).
+- ✅ **Aşama B:** Character Creator, çok açılı kimlik, kalıcı karakter kimliği (UUID ve `@yaratıcı/ad`), Character Lock (standart/güçlü/katı), @Karakter ile senaryo çözümleme. Mobilde karakter ekranları ve oyuncu kadrosu paneli var.
+- ✅ **Aşama C:** AI Casting Director (kural tabanlı), Character Marketplace (ilan, inceleme, lisans, takedown, şikâyet) ve Creator Royalty (kullanım başına lisans kredisi, tek seferlik telif, şelale kuralı, geri alma).
+- **Kullanıcıdan gerekenler (V6):**
+  - Karakter görselleri için gerçek görsel modeli seçimi ve doğrulaması: `GEMINI_API_KEY` ve `CHARACTER_IMAGE_MODEL`, ayrıca görsel başı USD fiyatı. [KARAR]
+  - Veo 3.1'in referans görsel desteği hesabınızda doğrulanmalı; ardından `veo` sağlayıcısında `CHARACTER_REFERENCE` açılır. [KARAR]
+  - Yüz eşleştirme kalite kontrolü için SFace/YuNet ONNX dosyaları worker'a eklenmeli: `MP_YUNET_ONNX`, `MP_SFACE_ONNX`.
+  - Karakter lisans koşulları için hukuk incelemesi; bitince pazar yeri bayrağı `legal_review_ref` ile açılır. [HUKUK]
+  - Telif oranı (`character_share_rate`) ile karakter kredisi fiyatları (önizleme/görünüm kredisi, güçlü kilit çarpanı, katı kilitte yeniden deneme hakkı). [KARAR]
+  - TTS (seslendirme) sağlayıcısı seçimi ve lisanslı ses kataloğu. Ses klonlama kapalı kalacak. [KARAR]
+- **Eksik / kısmi kalanlar:**
+  - Gerçek kimlik kalitesi henüz kanıtlanmadı. Şu an mock sağlayıcılarla yalnızca akış doğrulandı. Gerçek sağlayıcıyla eşik kalibrasyonu (ayrı bir sentetik test setiyle, güven aralığıyla) yapılmalı.
+  - Vekil (proxy) metrikler zayıf: arka görünüm renkten dolayı yüksek, ışık değişimi düşük skor alıyor. Bu metrikler hiçbir zaman "doğrulandı" demiyor.
+  - Studio'da karakter başına seslendirme ve dudak senkronu yok; diyaloglar altyazı olarak kalıyor.
+  - Casting Director kural tabanlı; AI (LLM) destekli seçim yok.
+  - Benzerlik denetimi metin tabanlı. Görsel benzerlik yalnızca algısal özetle (dHash) ve sezgisel olarak yapılıyor.
+  - Karakter işleri için yük testi, kimlik koşullandırmada öğrenen yönlendirme, en/tr dışındaki diller yok.
+  - Mobil ekranlar cihazda denenmedi (tip kontrolü ve çeviri testleri geçti).
 
 ### 5.3 İş bitince: Master Spec güncellemesi
 Kullanıcı talebi: Tüm aşamalar bitince Master Spec güncellenecek. V3, V4 ve V5'i tek belgede birleştiren, uygulanan durumu ("uygulandı / doğrulanmadı / eksik") ve gerçek mimariyi yansıtan güncel bir master spec hazırlanacak.
