@@ -20,6 +20,15 @@ class StudioAssembler:
     def healthcheck(self) -> dict:
         return {"ok": True, "gpu": False}
 
+class EditorRenderer:
+    """CPU-only final renders of V8 editor projects (ffmpeg)."""
+
+    name = "editor_renderer"
+
+    def healthcheck(self) -> dict:
+        return {"ok": True, "gpu": False}
+
+
 FACTORIES = {
     "mock": MockAdapter,
     "dreamid_v": command.dreamid_v,
@@ -35,6 +44,8 @@ FACTORIES = {
     "mock_t2v": MockT2V,
     "veo": VeoShot,
     "studio_assembler": StudioAssembler,
+    # V8 editor exports (CPU ffmpeg)
+    "editor_renderer": EditorRenderer,
     # V6 character identity images
     "mock_image": MockImage,
     "gemini_image": GeminiImage,

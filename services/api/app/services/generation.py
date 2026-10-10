@@ -351,6 +351,8 @@ def complete(db: Session, job_id: uuid.UUID, worker_id: str, attempt: int, outpu
 
     if job.kind == JobKind.character_asset:
         return _complete_character_asset(db, job, output, moderation_report)
+    if job.kind == JobKind.editor_render:
+        return _complete_editor_render(db, job, output, moderation_report)
 
     storage = get_storage()
     video_key = output_key(job, "video.mp4")
@@ -434,6 +436,30 @@ def _complete_character_asset(db: Session, job: GenerationJob, output: dict, rep
     return job
 
 
+def _complete_editor_render(db: Session, job: GenerationJob, output: dict, report: dict) -> GenerationJob:
+    from . import editor
+
+    key = editor.output_key(job)
+    head = get_storage().head(key)
+    if head is None or head["size"] <= 0:
+        _requeue_or_fail(db, job, "output_missing", "worker reported success but no file was stored")
+        return job
+    decision = moderation.check_output(report)
+    if not decision.allowed:
+        db.add(ModerationAction(job_id=job.id, target_user_id=job.user_id, source="auto_output",
+                                action="block_output", category=decision.category, note=",".join(decision.reasons)))
+        get_storage().delete(key)
+        job.error_code, job.error_message = "output_blocked", "the export did not pass our safety checks"
+        transition(job, JobStatus.failed)
+        _refund(db, job, "output_blocked")
+        return job
+    job.progress = 1.0
+    job.error_code = job.error_message = None
+    transition(job, JobStatus.completed)
+    credits.settle(db, job)
+    return job
+
+
 def fail(db: Session, job_id: uuid.UUID, worker_id: str, attempt: int, code: str, message: str,
          retryable: bool, metrics: dict | None = None) -> GenerationJob:
     job = _locked_leased_job(db, job_id, worker_id, attempt)
@@ -488,6 +514,10 @@ def build_worker_payload(db: Session, job: GenerationJob) -> dict:
         from . import characters
 
         return characters.build_payload(db, job)
+    if job.kind == JobKind.editor_render:
+        from . import editor
+
+        return editor.build_payload(db, job)
     if job.kind != JobKind.template:
         from . import multiperson
 

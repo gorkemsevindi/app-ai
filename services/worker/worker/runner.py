@@ -80,6 +80,9 @@ def process(api: ApiClient, adapters: dict, payload: dict, workdir: Path) -> Non
         if payload.get("kind") == "character_asset":
             _process_character(api, adapter, payload, workdir, hb, metrics, t0)
             return
+        if payload.get("kind") == "editor_render":
+            _process_editor(api, payload, workdir, hb, metrics, t0)
+            return
         refs = []
         for i, a in enumerate(payload["identity_assets"]):
             if a["kind"] == "photo":
@@ -258,6 +261,28 @@ def _process_character(api: ApiClient, adapter, payload: dict, workdir: Path, hb
                                    "width": int(img.shape[1]), "height": int(img.shape[0]),
                                    "model": info.get("model"), "mock": bool(info.get("mock")), "qc": qc},
                  report, metrics)
+
+
+def _process_editor(api: ApiClient, payload: dict, workdir: Path, hb: Heartbeat, metrics: dict, t0: float) -> None:
+    """V8: final render of a canonical project (CPU ffmpeg); originals are only read, never modified."""
+    from .editor.render import render
+
+    job_id, attempt, spec = payload["job_id"], payload["attempt"], payload["spec"]
+    assets = {aid: download(url, workdir / f"asset_{i}") for i, (aid, url) in enumerate(payload["asset_urls"].items())}
+    hb.update(0.1, "generating")
+    out = render(spec["manifest"], assets, spec["format"], spec.get("quality", "720p"), workdir,
+                 watermark=payload.get("watermark", False),
+                 metadata={"comment": f"project {spec['project_id']} revision {spec['revision']}",
+                           "title": spec["manifest"].get("project_id", "")})
+    if hb.lost.is_set():
+        return
+    hb.update(0.9, "postprocessing")
+    report = moderation_report(out)
+    upload(payload["upload"]["output"]["url"], out, payload["upload"]["output"]["mime"])
+    elapsed = time.time() - t0
+    metrics.update(gpu_seconds=0.0, cpu_seconds=round(elapsed, 2), est_cost_usd=0.0, renderer="ffmpeg")
+    hb.stop()
+    api.complete(job_id, attempt, {"bytes": out.stat().st_size, "format": spec["format"]}, report, metrics)
 
 
 def _safe_fail(api, job_id, attempt, code, msg, retryable, metrics) -> None:

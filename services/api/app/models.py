@@ -258,6 +258,7 @@ class JobKind(str, enum.Enum):
     studio_shot = "studio_shot"      # AI Studio: render one storyboard shot
     studio_assemble = "studio_assemble"  # AI Studio: assemble rendered shots + captions + audio
     character_asset = "character_asset"  # V6: one character identity image (preview / master / view)
+    editor_render = "editor_render"      # V8: final render of a canonical editor project (ffmpeg)
 
 
 class GenerationJob(TimestampMixin, Base):
@@ -1501,4 +1502,56 @@ class LifeStorySession(TimestampMixin, Base):
     privacy: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     production_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+# ---------------------------------------------------------------- V8 unified creative studio (web + iOS + Android)
+
+class EditorProject(TimestampMixin, Base):
+    """Canonical project (schema cp1) — the server-authoritative document every client edits with commands."""
+
+    __tablename__ = "editor_projects"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    owner_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    type: Mapped[str] = mapped_column(String(10))  # video|photo|social|film|episode
+    title: Mapped[str] = mapped_column(String(120))
+    revision: Mapped[int] = mapped_column(Integer, default=0)
+    document: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    production_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))  # optional V7 link
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class EditorRevision(Base):
+    """Append-only command log + snapshot per revision (restore = a new revision; nothing is overwritten)."""
+
+    __tablename__ = "editor_revisions"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    project_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("editor_projects.id", ondelete="CASCADE"), index=True)
+    revision: Mapped[int] = mapped_column(Integer)
+    base_revision: Mapped[int] = mapped_column(Integer)
+    commands: Mapped[list[Any]] = mapped_column(JSONB)
+    snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    idempotency_key: Mapped[str] = mapped_column(String(120))
+    client: Mapped[str | None] = mapped_column(String(20))  # web|ios|android|server
+    author_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (UniqueConstraint("project_id", "revision", name="uq_editor_revision"),
+                      UniqueConstraint("project_id", "idempotency_key", name="uq_editor_revision_idem"))
+
+
+class EditorAsset(TimestampMixin, Base):
+    """Uploaded media (originals are never modified). Referenced from projects as `asset:<id>`."""
+
+    __tablename__ = "editor_assets"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    owner_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(10))  # video|image|audio|font
+    mime: Mapped[str] = mapped_column(String(80))
+    name: Mapped[str] = mapped_column(String(160))
+    size_bytes: Mapped[int] = mapped_column(BigInteger)
+    storage_key: Mapped[str] = mapped_column(String(512))
+    status: Mapped[str] = mapped_column(String(12), default="pending")  # pending|ready|deleted
+    meta: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    license: Mapped[str | None] = mapped_column(String(200))
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

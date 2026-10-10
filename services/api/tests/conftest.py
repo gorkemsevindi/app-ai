@@ -133,7 +133,7 @@ def drain(client, storage, monkeypatch):
 
     monkeypatch.setattr(runner, "download", fake_download)
     monkeypatch.setattr(runner, "upload", fake_upload)
-    adapters = {n: FACTORIES[n]() for n in ("mock_image", "mock_t2v", "studio_assembler")}
+    adapters = {n: FACTORIES[n]() for n in ("mock_image", "mock_t2v", "studio_assembler", "editor_renderer")}
     wc = TestClient(app)
     wc.headers["Authorization"] = "Bearer test-worker-token"
     api = ApiClient.__new__(ApiClient)

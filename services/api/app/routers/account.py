@@ -67,6 +67,11 @@ def delete_user_data(db: Session, user: User, actor_id=None, ip: str | None = No
     db.execute(update(StudioCharacter).where(StudioCharacter.user_id == user.id)
                .values(deleted_at=now, identity_profile_id=None, description="", traits={}))
     db.execute(update(StudioProject).where(StudioProject.user_id == user.id).values(deleted_at=now))
+    from ..models import EditorAsset, EditorProject
+
+    removed += get_storage().delete_prefix(f"editor/{user.id}/")
+    db.execute(update(EditorAsset).where(EditorAsset.owner_id == user.id).values(status="deleted", deleted_at=now))
+    db.execute(update(EditorProject).where(EditorProject.owner_id == user.id).values(deleted_at=now))
     from ..models import Character, CharacterAsset
     from ..services import character_market
 

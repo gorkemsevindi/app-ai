@@ -35,6 +35,8 @@ def feature_of(job: GenerationJob) -> str:
         return "studio"
     if job.kind == JobKind.character_asset:
         return "character"
+    if job.kind == JobKind.editor_render:
+        return "editor_export"
     base = "template" if job.kind == JobKind.template else ("remix" if job.template_id else "multi_person")
     lip = ((job.spec or {}).get("audio") or {}).get("lip_sync", {}).get("enabled")
     return f"{base}+lip_sync" if lip else base

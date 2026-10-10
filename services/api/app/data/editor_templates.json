@@ -1,0 +1,233 @@
+{
+ "presets": {
+  "vertical_1080": {
+   "width": 1080,
+   "height": 1920,
+   "fps": 30,
+   "background": "#000000"
+  },
+  "landscape_1080": {
+   "width": 1920,
+   "height": 1080,
+   "fps": 30,
+   "background": "#000000"
+  },
+  "square_1080": {
+   "width": 1080,
+   "height": 1080,
+   "fps": 30,
+   "background": "#000000"
+  },
+  "poster_a4": {
+   "width": 1240,
+   "height": 1754,
+   "fps": 30,
+   "background": "#ffffff"
+  },
+  "thumbnail": {
+   "width": 1280,
+   "height": 720,
+   "fps": 30,
+   "background": "#111111"
+  }
+ },
+ "templates": [
+  {
+   "key": "movie_poster",
+   "title": "Movie poster",
+   "type": "photo",
+   "canvas": {
+    "width": 1240,
+    "height": 1754,
+    "fps": 30,
+    "background": "#0e0e12"
+   },
+   "commands": [
+    {
+     "type": "add_track",
+     "track_id": "bg",
+     "kind": "overlay",
+     "name": "Background"
+    },
+    {
+     "type": "add_clip",
+     "clip": {
+      "id": "band",
+      "track_id": "bg",
+      "shape": {
+       "type": "rect",
+       "width": 1240,
+       "height": 420,
+       "fill": "#e8453c"
+      },
+      "transform": {
+       "y": 520
+      }
+     }
+    },
+    {
+     "type": "add_track",
+     "track_id": "title",
+     "kind": "text",
+     "name": "Title"
+    },
+    {
+     "type": "add_clip",
+     "clip": {
+      "id": "t1",
+      "track_id": "title",
+      "start_ms": 0,
+      "duration_ms": 0,
+      "transform": {
+       "y": -500
+      },
+      "text": {
+       "content": "YOUR STORY",
+       "size": 120,
+       "color": "#ffffff",
+       "weight": "bold",
+       "align": "center",
+       "font": "Inter"
+      }
+     }
+    },
+    {
+     "type": "add_track",
+     "track_id": "sub",
+     "kind": "text",
+     "name": "Tagline"
+    },
+    {
+     "type": "add_clip",
+     "clip": {
+      "id": "t2",
+      "track_id": "sub",
+      "start_ms": 0,
+      "duration_ms": 0,
+      "transform": {
+       "y": -340
+      },
+      "text": {
+       "content": "Coming soon",
+       "size": 56,
+       "color": "#ffffff",
+       "weight": "bold",
+       "align": "center",
+       "font": "Inter"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "key": "episode_thumbnail",
+   "title": "Episode thumbnail",
+   "type": "photo",
+   "canvas": {
+    "width": 1280,
+    "height": 720,
+    "fps": 30,
+    "background": "#111111"
+   },
+   "commands": [
+    {
+     "type": "add_track",
+     "track_id": "title",
+     "kind": "text",
+     "name": "Title"
+    },
+    {
+     "type": "add_clip",
+     "clip": {
+      "id": "t1",
+      "track_id": "title",
+      "start_ms": 0,
+      "duration_ms": 0,
+      "transform": {
+       "y": -120
+      },
+      "text": {
+       "content": "EPISODE 1",
+       "size": 110,
+       "color": "#ffffff",
+       "weight": "bold",
+       "align": "center",
+       "font": "Inter"
+      }
+     }
+    },
+    {
+     "type": "add_track",
+     "track_id": "sub",
+     "kind": "text",
+     "name": "Subtitle"
+    },
+    {
+     "type": "add_clip",
+     "clip": {
+      "id": "t2",
+      "track_id": "sub",
+      "start_ms": 0,
+      "duration_ms": 0,
+      "transform": {
+       "y": 60
+      },
+      "text": {
+       "content": "The beginning",
+       "size": 60,
+       "color": "#ffffff",
+       "weight": "bold",
+       "align": "center",
+       "font": "Inter"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "key": "vertical_story",
+   "title": "Vertical story",
+   "type": "social",
+   "canvas": {
+    "width": 1080,
+    "height": 1920,
+    "fps": 30,
+    "background": "#000000"
+   },
+   "commands": [
+    {
+     "type": "add_track",
+     "track_id": "v1",
+     "kind": "video",
+     "name": "Video"
+    },
+    {
+     "type": "add_track",
+     "track_id": "cap",
+     "kind": "text",
+     "name": "Captions"
+    },
+    {
+     "type": "add_clip",
+     "clip": {
+      "id": "c1",
+      "track_id": "cap",
+      "start_ms": 0,
+      "duration_ms": 3000,
+      "transform": {
+       "y": 700
+      },
+      "text": {
+       "content": "Your caption here",
+       "size": 64,
+       "color": "#ffffff",
+       "weight": "bold",
+       "align": "center",
+       "font": "Inter"
+      }
+     }
+    }
+   ]
+  }
+ ]
+}
