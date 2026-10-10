@@ -56,6 +56,16 @@ def require_enabled(db: Session) -> dict:
     return cfg
 
 
+CLIENTS = {"web", "ios", "android"}
+
+
+def _client_label(raw: str | None) -> str | None:
+    # "server" and "restore" are reserved for revisions the API writes itself (restore changes conflict rules)
+    if not raw:
+        return None
+    return raw if raw in CLIENTS else "other"
+
+
 def out(p: EditorProject) -> dict:
     return {"id": str(p.id), "type": p.type, "title": p.title, "revision": p.revision, "project": p.document,
             "updated_at": p.updated_at.isoformat() if p.updated_at else None}
@@ -174,7 +184,7 @@ def commands(db: Session, user: User, project_id: uuid.UUID, base_revision: int,
     try:
         with db.begin_nested():
             db.add(EditorRevision(project_id=p.id, revision=rev, base_revision=base_revision, commands=cmds,
-                                  snapshot=doc, idempotency_key=idem, client=(client or "")[:20] or None,
+                                  snapshot=doc, idempotency_key=idem, client=_client_label(client),
                                   author_id=user.id))
             db.flush()
     except IntegrityError as e:

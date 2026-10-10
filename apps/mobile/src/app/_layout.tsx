@@ -35,6 +35,8 @@ export default function RootLayout() {
             <Stack.Screen name="productions/[id]" options={{ title: t('production.title') }} />
             <Stack.Screen name="productions/dialogue" options={{ title: t('dialogue.title') }} />
             <Stack.Screen name="productions/life" options={{ title: '' }} />
+            <Stack.Screen name="editor/index" options={{ title: t('editor.title') }} />
+            <Stack.Screen name="editor/[id]" options={{ title: t('editor.title') }} />
           </Stack>
         </AuthProvider>
       </ThemeProvider>

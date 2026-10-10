@@ -1,4 +1,5 @@
 import Constants from 'expo-constants';
+import { Platform } from 'react-native';
 import * as Crypto from 'expo-crypto';
 
 import { tokenStore } from './tokenStore';
@@ -44,7 +45,7 @@ export async function api<T = any>(
   opts: { method?: string; body?: Json; idempotencyKey?: string; auth?: boolean } = {},
 ): Promise<T> {
   const doFetch = async () => {
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const headers: Record<string, string> = { 'Content-Type': 'application/json', 'X-Client': Platform.OS };
     if (opts.auth !== false) {
       const access = await tokenStore.getAccess();
       if (access) headers.Authorization = `Bearer ${access}`;

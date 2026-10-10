@@ -51,6 +51,7 @@ export default function StudioTab() {
   return (
     <ScrollView style={{ backgroundColor: c.bg }} contentContainerStyle={{ padding: spacing.lg, gap: spacing.md }}>
       <StoryEntry />
+      <Button variant="secondary" title={t('editor.title')} onPress={() => router.push('/editor')} />
       <Title>{t('studio.title')}</Title>
       <Body muted>{t('studio.subtitle')}</Body>
       <TextInput accessibilityLabel={t('studio.briefLabel')} placeholder={t('studio.briefPlaceholder')} multiline

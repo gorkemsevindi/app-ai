@@ -95,6 +95,10 @@ def test_commands_idempotency_rebase_conflict_restore(client, db, storage):
         res["project"]["clips"]
     srt = client.get(f"/editor/projects/{pid}/subtitles.srt", headers=h).text
     assert srt == ""  # restored to before the title
+    # reserved client labels can't be spoofed (a fake "restore" would change the conflict rules)
+    spoof = cmds(client, h, pid, 4, [{"type": "set_title", "title": "spoof"}], client_name="restore").json()
+    top = client.get(f"/editor/projects/{pid}/revisions", headers=h).json()["items"][0]
+    assert top["revision"] == spoof["revision"] and top["client"] == "other"
     # object-level ACL: another user's asset can't be referenced
     o, _ = signup(client)
     foreign = upload(client, o, storage, "image", "image/png", b"p" * 10, "x.png")
