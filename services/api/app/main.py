@@ -18,6 +18,7 @@ from .routers import (
     identity,
     me,
     multiperson,
+    sharing,
     templates,
     templates_v3,
     worker,
@@ -62,7 +63,8 @@ def create_app() -> FastAPI:
         return {"ok": True}
 
     for r in (auth.router, me.router, identity.router, templates.router, templates_v3.router, generations.router,
-              account.router, multiperson.router, admin.router, worker.router, billing.router):
+              account.router, multiperson.router, admin.router, worker.router, billing.router,
+              sharing.router):
         app.include_router(r)
     return app
 

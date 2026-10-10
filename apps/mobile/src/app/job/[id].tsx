@@ -10,6 +10,7 @@ import { ActionSheetIOS, Alert, Platform, ScrollView, View } from 'react-native'
 import { Body, Button, ProgressBar, Title } from '@/components/ui';
 import { api, type Generation } from '@/lib/api';
 import { errorMessage } from '@/lib/errors';
+import { shareTemplateLink } from '@/lib/referral';
 import { displayProgress, formatEta, nextPollMs, stageKey, TERMINAL } from '@/lib/progress';
 import { radius, spacing, useColors } from '@/lib/theme';
 
@@ -57,6 +58,14 @@ export default function JobScreen() {
     await Sharing.shareAsync(file.uri, { mimeType: 'video/mp4', dialogTitle: t('job.share') });
   };
 
+  const shareLink = async () => {
+    try {
+      await shareTemplateLink({ job_id: job!.id }, t('share.message'));
+    } catch (e) {
+      Alert.alert(errorMessage(t, e));
+    }
+  };
+
   const report = () => {
     const send = async (reason: string) => {
       await api(`/generations/${id}/report`, { body: { reason } });
@@ -93,6 +102,7 @@ export default function JobScreen() {
           </View>
           <Body muted style={{ textAlign: 'center' }}>{t('job.aiLabel')}</Body>
           <Button title={t('job.share')} onPress={share} />
+          <Button title={t('share.link')} variant="secondary" onPress={shareLink} />
           <Button title={t('job.download')} variant="secondary" onPress={download} />
           <Button title={t('job.report')} variant="secondary" onPress={report} />
         </>

@@ -514,6 +514,48 @@ class CreditAllocation(Base):
     __table_args__ = (CheckConstraint("amount <> 0", name="ck_credit_allocations_nonzero"),)
 
 
+class ShareLink(Base):
+    """Server-issued share link ("Try this template"). The public token is `code.signature`; only `code`
+    is stored. Links point at a template, never at a user's private output video."""
+
+    __tablename__ = "share_links"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    code: Mapped[str] = mapped_column(String(32), unique=True)
+    owner_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    template_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("templates.id", ondelete="CASCADE"), index=True)
+    job_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("generation_jobs.id", ondelete="SET NULL"))
+    campaign: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ReferralClick(Base):
+    __tablename__ = "referral_clicks"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    link_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("share_links.id", ondelete="CASCADE"), index=True)
+    source: Mapped[str] = mapped_column(String(10))  # web|app
+    ip_hash: Mapped[str] = mapped_column(String(64))  # keyed hash, never the raw IP
+    platform: Mapped[str | None] = mapped_column(String(10))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class Attribution(Base):
+    """At most one referral attribution per user (first touch). Earnings policy comes later (Stage D)."""
+
+    __tablename__ = "attributions"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True)
+    link_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("share_links.id", ondelete="SET NULL"))
+    click_id: Mapped[int | None] = mapped_column(ForeignKey("referral_clicks.id", ondelete="SET NULL"))
+    referrer_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)
+    template_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("templates.id", ondelete="SET NULL"))
+    campaign: Mapped[str | None] = mapped_column(String(64))
+    model: Mapped[str] = mapped_column(String(20), default="first_touch")
+    policy: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)  # window/rules snapshot at attribution
+    attributed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class Report(TimestampMixin, Base):
     __tablename__ = "reports"
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)

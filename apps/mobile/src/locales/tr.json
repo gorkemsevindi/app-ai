@@ -94,7 +94,8 @@
     "violence": "Şiddet",
     "copyright": "Telif hakkı",
     "low_quality": "Düşük kalite",
-    "other": "Diğer"
+    "other": "Diğer",
+    "template": "Şablonu bildir"
   },
   "multi": {
     "title": "Senin videon, yeni yüzler",
@@ -151,7 +152,11 @@
     "speaker_mapping_required": "Bu videoda kimin konuştuğu/şarkı söylediği net değil. Dudak senkronunu kapatıp tekrar dene.",
     "cost_ceiling_exceeded": "Bu kombinasyon şu an üretilemiyor. Daha az kişi veya dudak senkronu olmadan dene.",
     "requote_required": "Bu videonun fiyatı güncelleniyor. Biraz sonra tekrar dene.",
-    "audio_analysis_missing": "Bu video için ses analizi yok; dudak senkronu kullanılamıyor."
+    "audio_analysis_missing": "Bu video için ses analizi yok; dudak senkronu kullanılamıyor.",
+    "not_shareable": "Sadece tamamlanmış şablon videoları paylaşılabilir.",
+    "purchase_other_account": "Bu satın alma başka bir hesaba ait.",
+    "billing_not_configured": "Satın alma şu anda kullanılamıyor.",
+    "invalid_receipt": "Satın alma doğrulanamadı."
   },
   "remix": {
     "slots": "Kim oynasın?",
@@ -166,5 +171,11 @@
     "lipSync": "Müzikle dudak senkronu",
     "on": "Açık",
     "off": "Kapalı"
+  },
+  "share": {
+    "link": "Şablon linkini paylaş",
+    "message": "Bu şablonu kendi yüzünle dene:",
+    "unavailable": "Bu şablon artık mevcut değil.",
+    "browse": "Şablonlara göz at"
   }
 }

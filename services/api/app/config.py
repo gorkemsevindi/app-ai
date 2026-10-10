@@ -71,6 +71,15 @@ class Settings(BaseSettings):
     apple_bundle_id: str = "com.example.aivideo"
     google_package_name: str = "com.example.aivideo"
 
+    # Sharing / deep links (V4 Stage A3)
+    share_link_secret: str | None = None  # defaults to a key derived from jwt_secret
+    share_base_url: str = "http://localhost:8000"  # public origin serving /t/{token} (universal/app links)
+    app_scheme: str = "aivideo"
+    ios_app_ids: list[str] = []  # "TEAMID.bundle.id" for apple-app-site-association
+    android_sha256_fingerprints: list[str] = []  # signing cert fingerprints for assetlinks.json
+    app_store_url: str | None = None
+    play_store_url: str | None = None
+
     cors_origins: list[str] = []
     terms_version: str = "2026-10-01"
 

@@ -1,6 +1,7 @@
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 
 import { api, type Me } from './api';
+import { claimPendingAttribution } from './referral';
 import { tokenStore } from './tokenStore';
 
 type AuthState = {
@@ -21,6 +22,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refreshMe = useCallback(async () => {
     try {
       setMe(await api<Me>('/me'));
+      claimPendingAttribution().catch(() => {});
     } catch {
       setMe(null);
     }

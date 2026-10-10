@@ -9,6 +9,7 @@ import {
   api, ApiError, newIdempotencyKey, type Estimate, type Generation, type Profile, type Template,
 } from '@/lib/api';
 import { errorMessage } from '@/lib/errors';
+import { shareTemplateLink } from '@/lib/referral';
 import { formatEta } from '@/lib/progress';
 import { radius, spacing, useColors } from '@/lib/theme';
 
@@ -106,6 +107,28 @@ export default function TemplateDetail() {
     }
   };
 
+  const shareLink = async () => {
+    try {
+      await shareTemplateLink({ template_id: id }, t('share.message'));
+    } catch (e) {
+      Alert.alert(errorMessage(t, e));
+    }
+  };
+
+  const report = () => {
+    const reasons = ['impersonation', 'copyright', 'sexual', 'minor_safety', 'other'];
+    Alert.alert(t('report.title'), undefined, [
+      ...reasons.map((r) => ({
+        text: t(`report.${r}`),
+        onPress: () => {
+          api(`/templates/${id}/report`, { body: { reason: r } })
+            .then(() => Alert.alert(t('job.reported'))).catch((e) => Alert.alert(errorMessage(t, e)));
+        },
+      })),
+      { text: t('job.cancel'), style: 'cancel' as const },
+    ]);
+  };
+
   const generate = async () => {
     if (!profile) return router.push('/identity/new');
     setBusy(true);
@@ -164,6 +187,8 @@ export default function TemplateDetail() {
       ) : (
         <Button title={profile ? t('template.generate') : t('discover.createProfile')} loading={busy} onPress={generate} />
       )}
+      <Button title={t('share.link')} variant="secondary" onPress={shareLink} />
+      <Button title={t('report.template')} variant="secondary" onPress={report} />
     </ScrollView>
   );
 }

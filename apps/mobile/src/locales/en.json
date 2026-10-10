@@ -94,7 +94,8 @@
     "violence": "Violence",
     "copyright": "Copyright",
     "low_quality": "Low quality",
-    "other": "Other"
+    "other": "Other",
+    "template": "Report template"
   },
   "multi": {
     "title": "Your video, new faces",
@@ -151,7 +152,11 @@
     "speaker_mapping_required": "It's unclear who is speaking or singing in this video. Turn lip-sync off and try again.",
     "cost_ceiling_exceeded": "This combination can't be rendered right now. Try fewer people or no lip-sync.",
     "requote_required": "Pricing for this video is being updated. Try again shortly.",
-    "audio_analysis_missing": "This video has no audio analysis, so lip-sync isn't available."
+    "audio_analysis_missing": "This video has no audio analysis, so lip-sync isn't available.",
+    "not_shareable": "Only finished template videos can be shared.",
+    "purchase_other_account": "This purchase belongs to another account.",
+    "billing_not_configured": "Purchases are not available right now.",
+    "invalid_receipt": "We couldn't verify this purchase."
   },
   "remix": {
     "slots": "Who stars in it?",
@@ -166,5 +171,11 @@
     "lipSync": "Lip-sync to the music",
     "on": "On",
     "off": "Off"
+  },
+  "share": {
+    "link": "Share template link",
+    "message": "Try this template with your own face:",
+    "unavailable": "This template is no longer available.",
+    "browse": "Browse templates"
   }
 }
