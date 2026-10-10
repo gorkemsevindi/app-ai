@@ -147,7 +147,11 @@
     "unsupported_media_type": "That file type isn't supported.",
     "slots_missing": "Fill the required roles.",
     "template_unavailable": "This template is being updated, try again soon.",
-    "confirmation_required": "Confirm the price before continuing."
+    "confirmation_required": "Confirm the price before continuing.",
+    "speaker_mapping_required": "It's unclear who is speaking or singing in this video. Turn lip-sync off and try again.",
+    "cost_ceiling_exceeded": "This combination can't be rendered right now. Try fewer people or no lip-sync.",
+    "requote_required": "Pricing for this video is being updated. Try again shortly.",
+    "audio_analysis_missing": "This video has no audio analysis, so lip-sync isn't available."
   },
   "remix": {
     "slots": "Who stars in it?",
@@ -158,6 +162,9 @@
     "confirm": "This video costs {{credits}} credits. Continue?",
     "people": "{{count}} people",
     "uses": "{{count}} uses",
-    "official": "Official"
+    "official": "Official",
+    "lipSync": "Lip-sync to the music",
+    "on": "On",
+    "off": "Off"
   }
 }

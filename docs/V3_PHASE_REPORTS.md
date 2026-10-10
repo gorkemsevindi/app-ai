@@ -111,3 +111,119 @@ Same as multi-person replacement: per-person sequential passes, so cost is linea
 ### Next step
 
 Phase 2: audio-driven lip-sync and expression preservation.
+
+---
+
+## Phase 2: Music and speech lip-sync, expression preservation, audio modes
+
+Feature flag: `lip_sync` (off by default). While the flag is off, nothing changes for lip-sync. The audio-mode fix below applies either way.
+
+### Behaviour change and fix
+
+Multi-person and remix outputs used to be delivered **without sound**, because `encode_vertical` always used `-an`. Jobs now default to `audio_mode=original`, which keeps the source soundtrack (spec §2.3). Two other modes exist:
+
+- `none` reproduces the old silent output.
+- `custom` uses a user-uploaded audio file that the user has attested rights to.
+
+### Files
+
+**Worker**
+- `worker/audio/core.py`: ffmpeg 16 kHz extraction, RMS envelope, energy VAD with hysteresis, mouth-band motion per tracked box, articulation signal, correlation and lag search.
+- `worker/audio/providers.py`:
+  - Separation: `none`, or `demucs` via `AUDIO_SEPARATION`.
+  - Lip-sync: `mock_lipsync` (dev only, refuses `WORKER_ENV=production`); `latentsync` and `musetalk` run as subprocesses and are licence-gated; `sync_so` always fails closed.
+  - Expression: `passthrough`; LivePortrait is gated.
+- `worker/audio/stage.py`:
+  - Speaker analysis: a suggested visible speaker per voice segment, with confidence and per-track scores. Confidence is lowered when vocals are not separated.
+  - Per-person lip-sync with a crop window and feathered paste.
+  - QC per track: sync offset (ms), lip-sync score, motion preservation.
+- Other worker changes:
+  - `multiperson/adapters.py`: analysis adds the audio timeline; replacement runs lip-sync, QC and the QA gate.
+  - `runner.py`: downloads custom audio.
+  - `pipeline/encode.py`: optional audio mux (AAC 128k).
+
+**API**
+- `models.py` + migration `0004_audio_lipsync` (additive, reversible): new `audio_assets` table.
+- `services/lipsync.py`:
+  - Options, speaker timeline in API track ids, auto/manual/template mapping.
+  - Pricing: `credits_per_second` × lip-synced seconds × premium multiplier.
+  - Cost ceiling and margin floor are checked before any debit.
+  - Custom audio: attestation, magic-byte sniffing, IDOR-safe access, delete.
+- `services/multiperson.py`, `services/templates_v3.py`: audio plan inside the single debit; signed `audio_url` in the worker payload.
+- `routers/multiperson.py`:
+  - `GET /source-videos/{id}/speakers`
+  - `POST /audio-assets`
+  - `POST /audio-assets/{id}/complete`
+  - `DELETE /audio-assets/{id}`
+  - The quote endpoint now returns a `breakdown` with `lip_sync`.
+- `routers/templates_v3.py`:
+  - `estimate` accepts `lip_sync`.
+  - `remix` accepts `audio`; a lip-sync price change returns 409 `confirmation_required` and rolls back before any debit.
+  - The admin source status now includes the speaker timeline.
+  - `version.config.speaker_mapping` (a curated timeline by `slot_id`) is validated.
+- `routers/templates.py`: template detail adds `lip_sync_available`.
+- `routers/account.py`: account deletion also marks audio assets as deleted.
+
+**Mobile**
+- The remix screen has a "Müzikle dudak senkronu" toggle, shown only when the template has a curated timeline. The live estimate includes lip-sync.
+- New error texts in TR and EN.
+
+### Speaker → person mapping policy (no guessing)
+
+- Only replaced persons are lip-synced; people left original already match the soundtrack.
+- A segment is auto-mapped only if the suggested speaker is replaced **and** confidence ≥ `min_mapping_confidence` (0.5).
+- A low-confidence segment where a replaced person shows mouth activity returns 409 `speaker_mapping_required` with the evidence. The client then asks the user, or the user turns lip-sync off.
+- Custom audio always needs a manual mapping.
+- Template remixes use the curated timeline and skip slots the user kept original.
+
+### Environment variables (worker)
+
+| Variable | Purpose |
+|---|---|
+| `AUDIO_SEPARATION` (`none`/`demucs`), `DEMUCS_CMD`, `DEMUCS_TIMEOUT_S` | Vocal separation |
+| `LATENTSYNC_LICENSE_CLEARED=1`, `LATENTSYNC_REPO/_CKPT/_PYTHON/_CMD` | LatentSync (the InsightFace weights are non-commercial, so legal sign-off is needed) |
+| `MUSETALK_LICENSE_CLEARED=1`, `MUSETALK_REPO/_CKPT/_PYTHON/_CMD` | MuseTalk (licences of the dependent models must be checked) |
+| `LIVEPORTRAIT_LICENSE_CLEARED=1` | Expression transfer (weights licence not verified) |
+| `LIPSYNC_TIMEOUT_S` | Provider subprocess timeout |
+
+Remote config `lip_sync` sets: provider, credits_per_second, premium_multiplier, max_offset_ms, min_sync_score, min_mapping_confidence, provider_usd_per_second, gpu_usd_per_person_second, credit_usd, max_job_cost_usd, margin_floor_usd, custom_audio_max_mb. There are no hard-coded prices or providers in clients.
+
+### Tests
+
+- API: **47/47** (6 new in `test_lipsync.py`):
+  - Defaults, flag gate and timeline privacy.
+  - Ambiguity returns 409, manual fix, exact pricing and debit.
+  - Cost ceiling and margin floor block before any debit.
+  - Custom audio: attestation, rejecting fake audio, IDOR, signed worker URL.
+  - Curated template timeline by slot, with estimate equal to the debit.
+  - **Real worker e2e:** analysis on a real A/V clip → mapping → mock lip-sync → QC metrics → delivered MP4 contains the audio stream.
+- Worker: **13/13** (7 new in `test_audio.py`):
+  - VAD and lag.
+  - Correct speaker per segment.
+  - Instrumental music gets low confidence.
+  - Clip without an audio track.
+  - **A 167 ms late mouth is detected and fails QC.**
+  - Mock lip-sync stays within 50 ms and keeps motion.
+  - Gated providers fail closed.
+- Checks: `ruff` clean; `alembic check` shows no drift; mobile `tsc` and tests pass.
+
+### Security and privacy
+
+- Custom audio requires a rights attestation (own or licensed) and is owner-scoped. Non-audio files are rejected and deleted.
+- Unlicensed models can't be enabled by accident: each needs an explicit `*_LICENSE_CLEARED` flag plus configuration.
+- The mock provider refuses to run in production.
+
+### Estimated cost
+
+Lip-sync is priced separately (default 3 credits per lip-synced second; premium ×2). Job cost is estimated as GPU (person × seconds) + provider $/s. With the defaults, a job is refused above $5 or below the margin floor, if one is set. Real provider costs must be measured on a GPU before launch.
+
+### Known limitations
+
+- No real lip-sync provider has been validated on a GPU, so quality is unproven. sync.so is not integrated: the network policy blocks it and there is no contract.
+- Speaker detection is a signal heuristic, not an ASD model. TalkNet-ASD is non-commercial.
+- The mobile app has no manual speaker-mapping UI; it currently offers turning lip-sync off. The API is ready for that UI.
+- The UI for uploading custom audio is not built yet; the endpoints are.
+
+### Next step
+
+Phase 3: creator marketplace. This covers creator profiles, template submission and moderation, a versioned RevenuePolicy, an append-only creator earnings ledger, settlement snapshots, risk holds and creator analytics.

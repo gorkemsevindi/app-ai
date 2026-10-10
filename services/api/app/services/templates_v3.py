@@ -37,7 +37,7 @@ from ..models import (
     User,
     VideoPerson,
 )
-from . import credits, multiperson
+from . import credits, lipsync, multiperson
 from .storage import VIDEO_MIMES, get_storage
 
 REMIX_FLAG = "template_remix"
@@ -168,8 +168,18 @@ def _validate_slots(db: Session, user: User, v: TemplateVersion, slots: list[Tem
     return out
 
 
+def remix_audio_plan(db: Session, user: User, v: TemplateVersion, slots: list[TemplatePersonSlot], pairs: list,
+                     audio: lipsync.AudioOptions | None) -> lipsync.AudioPlan:
+    video = db.get(SourceVideo, v.source_video_id)
+    assigned = {p.track_id: p.stats.get("worker_track_id") for p, _ in pairs}
+    return lipsync.plan(db, user, video, assigned, audio, len(pairs),
+                        template_mapping=(v.config or {}).get("speaker_mapping"),
+                        slot_to_track={s.slot_id: s.track_id for s in slots})
+
+
 def create_remix_job(db: Session, user: User, template_id: uuid.UUID, assignments: list[SlotAssignment],
-                     resolution: str, preview: bool, idempotency_key: str) -> tuple[GenerationJob, bool]:
+                     resolution: str, preview: bool, idempotency_key: str,
+                     audio: lipsync.AudioOptions | None = None) -> tuple[GenerationJob, bool]:
     enabled, cfg = remix_config(db)
     if not enabled:
         raise ApiError(403, "feature_disabled", "template remix is not available yet")
@@ -193,6 +203,12 @@ def create_remix_job(db: Session, user: User, template_id: uuid.UUID, assignment
         raise ApiError(422, "not_a_remix_template", "use the single-photo flow for this template")
     pairs = _validate_slots(db, user, v, slots, assignments, cfg)
     q = quote(db, t, v, len(pairs), resolution, preview)
+    # Templates default to keeping their (licensed) soundtrack; lip-sync uses the curated slot timeline.
+    ap = remix_audio_plan(db, user, v, slots, pairs, audio)
+    if not preview and ap.extra_credits:
+        q = {**q, "credits": q["credits"] + ap.extra_credits,
+             "breakdown": {**q["breakdown"], "lip_sync": ap.extra_credits}}
+    lipsync.enforce_economics(db, q["credits"], ap.est_cost_usd)
 
     credits.lock_user(db, user.id)
     active = db.execute(select(func.count()).select_from(GenerationJob).where(
@@ -211,7 +227,8 @@ def create_remix_job(db: Session, user: User, template_id: uuid.UUID, assignment
         template_id=t.id, template_version_id=v.id,
         extra_spec={"template_slots": [{"slot_id": slot_by_track[p.track_id], "track_id": p.track_id}
                                        for p, _ in pairs],
-                    "template_config": v.config or {}, "quote": q})
+                    "template_config": v.config or {}, "quote": q, "audio": ap.spec,
+                    "est_cost_usd": ap.est_cost_usd})
     return job, True
 
 
@@ -268,6 +285,9 @@ def create_version(db: Session, admin: User, t: Template, source_video_id: uuid.
             raise ApiError(422, "duplicate_slot", "slot ids and tracks must be unique")
         seen_slots.add(s["slot_id"])
         seen_tracks.add(p.track_id)
+    for seg in (config or {}).get("speaker_mapping", []):
+        if seg.get("slot_id") not in seen_slots or int(seg.get("end_ms", 0)) <= int(seg.get("start_ms", -1)):
+            raise ApiError(422, "bad_speaker_mapping", "speaker_mapping entries need a defined slot_id and a range")
     prev = db.execute(select(func.coalesce(func.max(TemplateVersion.version), 0))
                       .where(TemplateVersion.template_id == t.id)).scalar_one()
     v = TemplateVersion(template_id=t.id, version=int(prev) + 1, prompt_recipe=prompt_recipe,

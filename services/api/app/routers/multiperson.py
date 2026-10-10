@@ -9,8 +9,9 @@ from ..config import get_settings
 from ..db import get_db
 from ..deps import current_user
 from ..models import GenerationJob, SourceVideo, User
+from ..schemas import AudioOptionsIn
+from ..services import lipsync, ratelimit
 from ..services import multiperson as mp
-from ..services import ratelimit
 from ..services.generation import audit
 from ..services.storage import get_storage
 from .generations import to_out
@@ -34,6 +35,7 @@ class QuoteIn(BaseModel):
     assignments: list[Assignment]
     resolution: str = "720x1280"
     preview: bool = False
+    audio: AudioOptionsIn | None = None
 
 
 class MultiGenIn(QuoteIn):
@@ -107,9 +109,13 @@ def quote(video_id: uuid.UUID, body: QuoteIn, user: User = Depends(current_user)
     cfg = mp.require_enabled(db)
     v = mp.get_own_video(db, user, video_id)
     pairs = mp.validate_assignments(db, user, v, cfg, [(a.track_id, a.profile_id) for a in body.assignments])
-    return {"credits": mp.quote(cfg, len(pairs), v.duration_ms or 0, body.resolution, body.preview),
+    ap = mp.audio_plan(db, user, v, pairs, body.audio.to_options() if body.audio else None)
+    base = mp.quote(cfg, len(pairs), v.duration_ms or 0, body.resolution, body.preview)
+    total = base + (0 if body.preview else ap.extra_credits)
+    lipsync.enforce_economics(db, total, ap.est_cost_usd)
+    return {"credits": total, "breakdown": {"replacement": base, "lip_sync": 0 if body.preview else ap.extra_credits},
             "persons": len(pairs), "duration_ms": v.duration_ms, "resolution": body.resolution,
-            "preview": body.preview}
+            "preview": body.preview, "speaker_mapping": ap.spec.get("speaker_mapping", [])}
 
 
 @router.post("/generations/multi", status_code=201)
@@ -120,7 +126,8 @@ def create_multi(body: MultiGenIn, response: Response, user: User = Depends(curr
         ratelimit.hit("generate", str(user.id), get_settings().rl_generation_per_min)
     job, created = mp.create_replace_job(db, user, body.source_video_id,
                                          [(a.track_id, a.profile_id) for a in body.assignments],
-                                         body.resolution, body.preview, idempotency_key)
+                                         body.resolution, body.preview, idempotency_key,
+                                         audio=body.audio.to_options() if body.audio else None)
     db.commit()
     if not created:
         response.status_code = 200
@@ -135,3 +142,42 @@ def list_videos(user: User = Depends(current_user), db: Session = Depends(get_db
                     .order_by(SourceVideo.created_at.desc()).limit(20)).scalars()
     return [_video_out(v) for v in vs]
 
+
+
+@router.get("/source-videos/{video_id}/speakers")
+def video_speakers(video_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Who speaks when: suggestions + confidence per segment, for manual correction before lip-sync."""
+    v = mp.get_own_video(db, user, video_id)
+    return {**lipsync.speakers(v), "min_confidence": lipsync.config(db)[1]["min_mapping_confidence"]}
+
+
+class AudioCreateIn(BaseModel):
+    mime: str
+    size_bytes: int = Field(gt=0)
+    rights_basis: str = Field(pattern=r"^(own|licensed)$")
+    attest_rights: bool = Field(description="I own this audio or hold a licence that covers this use")
+
+
+@router.post("/audio-assets", status_code=201)
+def create_audio(body: AudioCreateIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    ratelimit.hit("audio", str(user.id), 10)
+    a = lipsync.create_audio(db, user, body.mime, body.size_bytes, body.rights_basis, body.attest_rights)
+    audit(db, user.id, "audio.attest", "audio_asset", str(a.id), {"basis": body.rights_basis})
+    db.commit()
+    _, cfg = lipsync.config(db)
+    post = get_storage().presign_upload(a.storage_key, a.mime, int(cfg["custom_audio_max_mb"]) * 1024 * 1024)
+    return {"id": str(a.id), "upload_url": post.url, "fields": post.fields, "expires_in": post.expires_in}
+
+
+@router.post("/audio-assets/{audio_id}/complete")
+def complete_audio(audio_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    a = lipsync.complete_audio(db, lipsync.get_own_audio(db, user, audio_id))
+    db.commit()
+    return {"id": str(a.id), "status": a.status}
+
+
+@router.delete("/audio-assets/{audio_id}", status_code=204)
+def delete_audio(audio_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    lipsync.delete_audio(db, lipsync.get_own_audio(db, user, audio_id))
+    audit(db, user.id, "audio.delete", "audio_asset", str(audio_id))
+    db.commit()

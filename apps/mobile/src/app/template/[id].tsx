@@ -22,6 +22,7 @@ export default function TemplateDetail() {
   // Remix templates: slot_id -> profile id (absent = keep the original person in that role).
   const [cast, setCast] = useState<Record<string, string>>({});
   const [quote, setQuote] = useState<Estimate | null>(null);
+  const [lipSync, setLipSync] = useState(false);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   // One key per screen visit: double taps / network retries can't create (or charge) twice.
@@ -53,9 +54,9 @@ export default function TemplateDetail() {
   // Server-side quote whenever the casting changes (spec: show the exact price before generating).
   useEffect(() => {
     if (!isRemix) return;
-    api<Estimate>('/generations/estimate', { body: { template_id: id, slots: Object.keys(cast) } })
+    api<Estimate>('/generations/estimate', { body: { template_id: id, slots: Object.keys(cast), lip_sync: lipSync } })
       .then(setQuote).catch(() => setQuote(null));
-  }, [isRemix, cast, id]);
+  }, [isRemix, cast, id, lipSync]);
 
   const cycleSlot = (slotId: string) => {
     const order = [undefined, ...profiles.map((p) => p.id)];
@@ -74,13 +75,21 @@ export default function TemplateDetail() {
       setBusy(true);
       try {
         const job = await api<Generation>('/generations/remix', {
-          body: { template_id: id, assignments, confirmed_credits: quote?.credits ?? null },
+          body: {
+            template_id: id, assignments, confirmed_credits: quote?.credits ?? null,
+            ...(lipSync ? { audio: { lip_sync: { enabled: true, mode: 'auto' } } } : {}),
+          },
           idempotencyKey: idemKey.current,
         });
         router.replace({ pathname: '/job/[id]', params: { id: job.id } });
       } catch (e) {
         if (e instanceof ApiError && (e.code === 'insufficient_credits' || e.code === 'pro_required')) {
           router.push('/paywall');
+        } else if (e instanceof ApiError && e.code === 'confirmation_required') {
+          // lip-sync price is final only at creation: refresh the quote so the user can confirm it
+          api<Estimate>('/generations/estimate', { body: { template_id: id, slots: Object.keys(cast), lip_sync: lipSync } })
+            .then(setQuote).catch(() => setQuote(null));
+          Alert.alert(errorMessage(t, e));
         } else {
           Alert.alert(errorMessage(t, e));
         }
@@ -138,6 +147,10 @@ export default function TemplateDetail() {
                 label={`${s.label}${s.required ? ` (${t('remix.required')})` : ''}: ${chosen ? chosen.name : t('remix.keep')}`} />
             );
           })}
+          {tpl.lip_sync_available ? (
+            <Chip active={lipSync} onPress={() => setLipSync((v) => !v)}
+              label={`${t('remix.lipSync')}: ${lipSync ? t('remix.on') : t('remix.off')}`} />
+          ) : null}
         </View>
       ) : null}
       {tpl.accepts_text ? (

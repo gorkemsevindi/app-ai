@@ -13,7 +13,8 @@ from ..db import get_db
 from ..deps import admin_user, client_ip, current_user
 from ..errors import ApiError, not_found
 from ..models import GenerationJob, SourceVideo, Template, TemplateVersion, User
-from ..services import credits, ratelimit
+from ..schemas import AudioOptionsIn
+from ..services import credits, lipsync, ratelimit
 from ..services import multiperson as mp
 from ..services import templates_v3 as tv3
 from ..services.generation import audit
@@ -37,6 +38,7 @@ class EstimateIn(BaseModel):
     slots: list[str] = Field(default_factory=list, description="slot ids the user intends to fill")
     resolution: str = "720x1280"
     preview: bool = False
+    lip_sync: bool = False
 
 
 @router.post("/generations/estimate")
@@ -48,8 +50,16 @@ def estimate(body: EstimateIn, user: User = Depends(current_user), db: Session =
     slots = tv3.slots_of(db, v)
     if tv3.is_remix(v, slots):
         known = {s.slot_id for s in slots}
-        n = len([s for s in body.slots if s in known]) or 1
+        chosen = [s for s in body.slots if s in known]
+        n = len(chosen) or 1
         q = tv3.quote(db, t, v, n, body.resolution, body.preview)
+        if body.lip_sync and not body.preview:
+            # Upper bound from the curated speaker timeline of the chosen slots (exact price at create time).
+            _, lcfg = lipsync.config(db)
+            secs = sum((s["end_ms"] - s["start_ms"]) / 1000 for s in (v.config or {}).get("speaker_mapping", [])
+                       if s.get("slot_id") in (chosen or [slots[0].slot_id]))
+            extra = int(-(-float(lcfg["credits_per_second"]) * secs // 1))
+            q = {**q, "credits": q["credits"] + extra, "breakdown": {**q["breakdown"], "lip_sync": extra}}
     else:
         n = 1
         q = {"credits": t.credit_cost, "breakdown": {"base": t.credit_cost}, "confirm_required": False}
@@ -69,6 +79,7 @@ class RemixIn(BaseModel):
     resolution: str = "720x1280"
     preview: bool = False
     confirmed_credits: int | None = Field(default=None, description="price the user saw and accepted")
+    audio: AudioOptionsIn | None = None
 
 
 @router.post("/generations/remix", status_code=201)
@@ -80,14 +91,19 @@ def remix(body: RemixIn, response: Response, user: User = Depends(current_user),
     if replay is None:
         ratelimit.hit("generate", str(user.id), get_settings().rl_generation_per_min)
         t = db.get(Template, body.template_id)
-        if t is not None and tv3.is_usable(t):
+        if t is not None and tv3.is_usable(t) and (body.audio is None or not body.audio.lip_sync.enabled):
             q = tv3.quote(db, t, tv3.current_version(db, t), len(body.assignments), body.resolution, body.preview)
             if q["confirm_required"] and body.confirmed_credits != q["credits"]:
                 raise ApiError(409, "confirmation_required", "confirm the price before generating",
                                {"credits": q["credits"]})
     job, created = tv3.create_remix_job(
         db, user, body.template_id, [tv3.SlotAssignment(a.slot_id, a.profile_id) for a in body.assignments],
-        body.resolution, body.preview, idempotency_key)
+        body.resolution, body.preview, idempotency_key, audio=body.audio.to_options() if body.audio else None)
+    if (body.audio and body.audio.lip_sync.enabled and created and job.spec["quote"]["confirm_required"]
+            and body.confirmed_credits != job.credit_cost):
+        db.rollback()  # lip-sync price depends on the timeline: confirm the final amount before any debit
+        raise ApiError(409, "confirmation_required", "confirm the price before generating",
+                       {"credits": job.credit_cost})
     db.commit()
     if not created:
         response.status_code = 200
@@ -140,7 +156,7 @@ def admin_source_status(template_id: uuid.UUID, video_id: uuid.UUID, admin: User
         raise not_found("source video")
     st = get_storage()
     return {"id": str(v.id), "status": v.status.value, "rejection_reason": v.rejection_reason,
-            "duration_ms": v.duration_ms, "flags": v.analysis.get("flags", []),
+            "duration_ms": v.duration_ms, "flags": v.analysis.get("flags", []), "speakers": lipsync.speakers(v),
             "tracks": [{"track_id": p.track_id, "selectable": p.selectable, "flags": p.flags,
                         "coverage": round(p.coverage, 3), "median_face_px": p.median_face_px,
                         "thumbnail_url": st.presign_get(p.thumbnail_key) if p.thumbnail_key else None}

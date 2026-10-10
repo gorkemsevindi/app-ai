@@ -355,6 +355,24 @@ class VideoPerson(Base):
     __table_args__ = (UniqueConstraint("source_video_id", "track_id", name="uq_video_persons_track"),)
 
 
+class AudioAsset(TimestampMixin, Base):
+    """User-supplied soundtrack for lip-sync (spec §27 audio_mode=custom). Rights attested at creation."""
+
+    __tablename__ = "audio_assets"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    storage_key: Mapped[str] = mapped_column(String(512), unique=True)
+    mime: Mapped[str] = mapped_column(String(64))
+    declared_size: Mapped[int] = mapped_column(BigInteger)
+    size_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    status: Mapped[str] = mapped_column(String(20), default="pending_upload")  # pending_upload|ready|rejected|deleted
+    rights_basis: Mapped[str] = mapped_column(String(20))  # own|licensed
+    rights_attested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    attestation_version: Mapped[str] = mapped_column(String(32))
+    duration_ms: Mapped[int | None] = mapped_column(Integer)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class JobAssignment(Base):
     __tablename__ = "job_assignments"
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)

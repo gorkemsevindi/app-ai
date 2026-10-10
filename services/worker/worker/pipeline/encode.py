@@ -33,7 +33,10 @@ def probe(path: Path) -> dict:
 
 
 def encode_vertical(src: Path, out_dir: Path, width: int = 720, height: int = 1280, watermark: bool = True,
-                    watermark_text: str = "AI generated", job_id: str = "", fps: int = 24) -> EncodedVideo:
+                    watermark_text: str = "AI generated", job_id: str = "", fps: int = 24,
+                    audio: Path | None = None) -> EncodedVideo:
+    """`audio`: optional media whose first audio stream is muxed in (trimmed to the video). Without it the
+    output is silent, as before."""
     out = out_dir / "final.mp4"
     thumb = out_dir / "thumb.jpg"
     # scale-to-cover then center-crop to exact 9:16, constant frame rate for platform compatibility
@@ -43,8 +46,15 @@ def encode_vertical(src: Path, out_dir: Path, width: int = 720, height: int = 12
         safe = watermark_text.replace(":", r"\:").replace("'", "")
         vf += (f",drawtext=text='{safe}':fontcolor=white@0.75:fontsize={height // 40}:"
                f"x=w-tw-{width // 30}:y=h-th-{height // 24}:box=1:boxcolor=black@0.25:boxborderw=8")
-    _run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(src), "-vf", vf, "-c:v", "libx264", "-profile:v", "high",
-          "-preset", "medium", "-crf", "20", "-movflags", "+faststart", "-an",
+    from ..audio.core import has_audio
+
+    audio_args = ["-an"]
+    inputs = ["-i", str(src)]
+    if audio is not None and has_audio(audio):
+        inputs += ["-i", str(audio)]
+        audio_args = ["-map", "0:v:0", "-map", "1:a:0", "-c:a", "aac", "-b:a", "128k", "-shortest"]
+    _run(["ffmpeg", "-y", "-loglevel", "error", *inputs, "-vf", vf, "-c:v", "libx264", "-profile:v", "high",
+          "-preset", "medium", "-crf", "20", "-movflags", "+faststart", *audio_args,
           "-metadata", "comment=AI-generated content",
           "-metadata", f"description=ai_generated=true;job={job_id}", str(out)])
     _run(["ffmpeg", "-y", "-loglevel", "error", "-ss", "0.5", "-i", str(out), "-frames:v", "1", "-q:v", "3",

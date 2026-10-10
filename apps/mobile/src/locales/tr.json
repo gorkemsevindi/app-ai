@@ -147,7 +147,11 @@
     "unsupported_media_type": "Bu dosya türü desteklenmiyor.",
     "slots_missing": "Zorunlu rolleri doldur.",
     "template_unavailable": "Bu şablon güncelleniyor, birazdan tekrar dene.",
-    "confirmation_required": "Devam etmeden önce fiyatı onayla."
+    "confirmation_required": "Devam etmeden önce fiyatı onayla.",
+    "speaker_mapping_required": "Bu videoda kimin konuştuğu/şarkı söylediği net değil. Dudak senkronunu kapatıp tekrar dene.",
+    "cost_ceiling_exceeded": "Bu kombinasyon şu an üretilemiyor. Daha az kişi veya dudak senkronu olmadan dene.",
+    "requote_required": "Bu videonun fiyatı güncelleniyor. Biraz sonra tekrar dene.",
+    "audio_analysis_missing": "Bu video için ses analizi yok; dudak senkronu kullanılamıyor."
   },
   "remix": {
     "slots": "Kim oynasın?",
@@ -158,6 +162,9 @@
     "confirm": "Bu video {{credits}} kredi tutacak. Devam edilsin mi?",
     "people": "{{count}} kişi",
     "uses": "{{count}} kullanım",
-    "official": "Resmi"
+    "official": "Resmi",
+    "lipSync": "Müzikle dudak senkronu",
+    "on": "Açık",
+    "off": "Kapalı"
   }
 }

@@ -8,6 +8,7 @@ from ..db import get_db
 from ..errors import not_found
 from ..models import Template
 from ..schemas import TemplateOut
+from ..services import lipsync
 from ..services import templates_v3 as tv3
 
 router = APIRouter(tags=["templates"])
@@ -50,6 +51,7 @@ def get_template(template_id: uuid.UUID, db: Session = Depends(get_db)):
         out.mode = "remix"
         out.person_slots = tv3.slot_out(db, v)
         out.est_credits = tv3.quote(db, t, v, 1, "720x1280", False)["credits"]
+        out.lip_sync_available = lipsync.config(db)[0] and bool((v.config or {}).get("speaker_mapping"))
     else:
         out.est_credits = t.credit_cost
     return out

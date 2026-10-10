@@ -147,14 +147,20 @@ def _process_multiperson(api: ApiClient, adapter, payload: dict, workdir: Path, 
         identities[track] = [download(a["url"], workdir / f"id_{track}_{i:02d}.img")
                              for i, a in enumerate(assets) if a["kind"] == "photo"]
     hb.update(0.05, "generating")
-
+    audio_cfg = payload.get("spec", {}).get("audio") or {}
+    custom_audio = download(payload["audio_url"], workdir / "custom_audio.bin") if payload.get("audio_url") else None
+    kw = {"audio": custom_audio} if custom_audio else {}
     out, qa = adapter.run(payload, source, json.loads(tracks_path.read_text()), identities, workdir, hb.update,
-                          hb.cancel)
+                          hb.cancel, **kw)
     if hb.lost.is_set():
         return
     hb.update(0.9, "postprocessing")
     w, h = (int(x) for x in payload["spec"].get("resolution", "720x1280").split("x"))
-    enc = encode_vertical(out, workdir, width=w, height=h, watermark=payload.get("watermark", True), job_id=job_id)
+    # Spec §2.3/§27: keep the original soundtrack unless the user chose licensed custom audio or none.
+    mode = audio_cfg.get("audio_mode", "none")
+    audio_src = custom_audio if mode == "custom" else (source if mode == "original" else None)
+    enc = encode_vertical(out, workdir, width=w, height=h, watermark=payload.get("watermark", True), job_id=job_id,
+                          audio=audio_src)
     report = moderation_report(enc.video)
     upload(payload["upload"]["video"]["url"], enc.video, "video/mp4")
     upload(payload["upload"]["thumbnail"]["url"], enc.thumbnail, "image/jpeg")

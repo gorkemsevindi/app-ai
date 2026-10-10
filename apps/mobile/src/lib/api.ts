@@ -93,7 +93,7 @@ export type Template = {
   thumbnail_url: string | null; preview_url: string | null; duration_s: number; credit_cost: number;
   est_seconds: number; accepts_text: boolean; pro_only: boolean;
   // V3 (optional so older API responses still type-check)
-  mode?: 'single' | 'remix'; person_slots?: TemplateSlot[]; est_credits?: number | null;
+  mode?: 'single' | 'remix'; person_slots?: TemplateSlot[]; est_credits?: number | null; lip_sync_available?: boolean;
 };
 /** Server-ranked feed card (GET /feed). Ranking weights never reach the client. */
 export type FeedItem = {
